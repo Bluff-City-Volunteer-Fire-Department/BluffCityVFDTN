@@ -246,11 +246,32 @@
     if (s.footer && s.footer.blurb) document.querySelectorAll('[data-footer="blurb"]').forEach(function (el) { el.textContent = s.footer.blurb; });
   }
 
+  function forms() {
+    document.querySelectorAll("form[data-form]").forEach(function (f) {
+      var status = f.querySelector(".form-status"), btn = f.querySelector('button[type="submit"]');
+      var fallback = "Sorry, that did not send. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM.";
+      f.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (!C.web3formsKey) { status.textContent = "This form is not connected yet. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM."; return; }
+        var fd = new FormData(f); if (fd.get("botcheck")) return;
+        var data = {}; fd.forEach(function (v, k) { if (k !== "botcheck") data[k] = v; });
+        data.access_key = C.web3formsKey; data.subject = f.getAttribute("data-subject"); data.from_name = "Bluff City VFD website";
+        btn.disabled = true; status.textContent = "Sending\u2026";
+        fetch("https://api.web3forms.com/submit", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(data) })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { if (!j.success) throw new Error(j.message || "failed"); f.reset(); status.textContent = f.getAttribute("data-thanks"); })
+          .catch(function () { status.textContent = fallback; })
+          .then(function () { btn.disabled = false; });
+      });
+    });
+  }
+
   get("apparatus?select=*&is_active=eq.true&order=sort_order.asc").then(apparatus).catch(function () {});
   get("site_content?select=key,value").then(content).catch(function () {});
   if (document.querySelector("[data-events-upcoming],[data-home-events]")) get("events?select=*&status=eq.published&order=starts_at.asc&limit=300").then(events).catch(function () {});
   if (document.querySelector("[data-news],[data-home-news]")) get("news?select=id,title,category,summary,cover_path,published_at&status=eq.published&order=published_at.desc&limit=60").then(news).catch(function () {});
   article();
+  forms();
   calls();
   get("site_settings?select=key,value").then(siteSettings).catch(function () {});
   gallery();

@@ -128,3 +128,15 @@ p:empty{display:none}
 .ctl{display:flex;flex-wrap:wrap;gap:1rem;margin:1rem 0 2rem}
 .ctl label span{display:block;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
 .ctl select{background:#0D0D0D;color:#fff;border:1px solid var(--line);padding:.55rem .7rem;font:inherit;min-width:200px}
+
+.site-form{max-width:760px}
+.site-form .row2{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+.site-form label{display:block;margin-bottom:1rem}
+.site-form label>span{display:block;font-size:.85rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.3rem}
+.site-form input[type=text],.site-form input[type=email],.site-form input[type=tel],.site-form input[type=number],.site-form select,.site-form textarea{width:100%;background:#0D0D0D;color:#fff;border:1px solid #555;border-radius:2px;padding:.7rem .8rem;font:inherit}
+.site-form input:focus,.site-form select:focus,.site-form textarea:focus{outline:3px solid #fff;outline-offset:1px}
+.site-form .check{display:flex;gap:.6rem;align-items:flex-start}.site-form .check input{margin-top:.35rem}
+.site-form .check span{text-transform:none;letter-spacing:0;font-size:1rem;color:#e6e6e6;margin:0}
+.form-status{min-height:1.5rem;margin-top:1rem;font-weight:600}
+.form-note{font-size:.9rem;color:var(--muted)}
+button.btn{cursor:pointer}
