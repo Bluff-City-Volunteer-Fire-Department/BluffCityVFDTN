@@ -163,10 +163,10 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
   /* ---------- app shell ---------- */
   var PERMS = {
     none: [], contributor: ["dashboard", "news", "gallery", "incidents", "account"],
-    editor: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "homepage", "contact", "account"],
-    admin: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "settings", "homepage", "contact", "users", "log", "account"]
+    editor: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "people", "homepage", "contact", "account"],
+    admin: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "people", "settings", "homepage", "contact", "users", "log", "account"]
   };
-  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", gallery: "Gallery", collage: "Homepage collage", incidents: "Recent Calls", department: "Department info", settings: "Website settings", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
+  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", gallery: "Gallery", collage: "Homepage collage", incidents: "Recent Calls", department: "Department info", people: "People", settings: "Website settings", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
 
   function enter(user) {
     sb.from("profiles").select("role,email").eq("id", user.id).maybeSingle().then(function (r) {
@@ -192,7 +192,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
         h("div", { class: "row" }, h("small", {}, me.email), h("a", { class: "btn ghost small", href: "index.html", target: "_blank", rel: "noopener" }, "View site"),
           h("button", { class: "btn ghost small", onclick: signOut }, "Sign out")))),
       h("div", { class: "lay" }, nav, main));
-    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, gallery: vGallery, collage: vCollage, incidents: vIncidents, department: vDepartment, settings: vSettings, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
+    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, gallery: vGallery, collage: vCollage, incidents: vIncidents, department: vDepartment, people: vPeople, settings: vSettings, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
     Promise.resolve().then(fn).then(function (node) { main.replaceChildren(node); }).catch(function (e) { main.replaceChildren(h("p", { class: "err" }, "Could not load this page: " + (e.message || e))); });
   }
   function signOut() { sb.auth.signOut().then(function () { me = null; showLogin(); }); }
@@ -780,6 +780,46 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
           saveContent("site_settings", "navigation", nav).then(function () { toast("Menu saved. The public site updates right away.", true); }).catch(fail);
         } }, "Save menu"),
         h("p", { class: "muted", style: "margin-top:2.5rem" }, "To manage who can sign in, use Users & roles in the side menu."));
+    });
+  }
+
+
+  /* ---------- people (roster on the About page) ---------- */
+  function vPeople() {
+    return sb.from("members").select("*").order("sort_order", { ascending: true }).then(function (r) {
+      if (r.error) throw new Error("The People list is not set up yet. Run the supabase-people.sql file in Supabase first. (" + r.error.message + ")");
+      var rows = r.data, box = h("div", {}, h("h1", {}, "People"),
+        h("p", { class: "muted prose" }, "These members appear in the Our People section of the About page, in this order. Only add members who have agreed to be shown, with their photo, and do not list anyone under 18."),
+        h("div", { class: "row", style: "margin-bottom:1.5rem" }, h("button", { class: "btn primary", onclick: function () {
+          var n = prompt("Member's full name"); if (!n || !n.trim()) return;
+          sb.from("members").insert({ full_name: n.trim(), sort_order: nextOrder(rows) }).then(function (x) { if (x.error) return fail(x.error); toast("Added. Now add a title, start year, and photo.", true); shell(); });
+        } }, "Add a member")));
+      rows.forEach(function (m, i) {
+        var thumb = h("div", { class: "thumb" }, m.photo_path ? h("img", { src: pubUrl(m.photo_path), alt: m.full_name }) : document.createTextNode("No photo yet"));
+        var f = h("div", {}, field("Full name", "full_name", m.full_name), field("Title or rank (for example: Chief, Captain, Firefighter)", "title", m.title),
+          field("Year they joined (for example: 2015)", "member_since", m.member_since, "number"),
+          h("label", { class: "f" }, h("input", { type: "checkbox", name: "is_active", checked: m.is_active }), " Show on the website"));
+        var file = h("input", { type: "file", accept: "image/*", "aria-label": "Upload photo of " + m.full_name, onchange: function () {
+          if (!file.files[0]) return; toast("Uploading\u2026", true);
+          uploadPhoto(file.files[0], false).then(function (path) { var old = m.photo_path; return update("members", m.id, { photo_path: path }).then(function (row) {
+            m.photo_path = row.photo_path; thumb.replaceChildren(h("img", { src: pubUrl(path), alt: m.full_name })); toast("Photo saved.", true); if (old) removeFiles([old]); }); }).catch(fail);
+        } });
+        function move(d) { var o = rows[i + d]; if (!o) return; Promise.all([update("members", m.id, { sort_order: o.sort_order }), update("members", o.id, { sort_order: m.sort_order })]).then(function () { shell(); }).catch(fail); }
+        box.append(h("div", { class: "panel app" }, h("div", {}, thumb, h("div", { style: "margin-top:.6rem" }, file)), h("div", {}, f, h("div", { class: "row" },
+          h("button", { class: "btn primary", onclick: function () {
+            var v = vals(f); if (!v.full_name) return fail(new Error("Please enter a name."));
+            var yr = v.member_since ? parseInt(v.member_since, 10) : null; if (yr && (yr < 1900 || yr > new Date().getFullYear())) return fail(new Error("Please enter a valid year, such as 2015."));
+            update("members", m.id, { full_name: v.full_name, title: v.title || null, member_since: yr, is_active: v.is_active }).then(function () { toast("Saved.", true); }).catch(fail);
+          } }, "Save"),
+          h("button", { class: "btn ghost small", disabled: i === 0, onclick: function () { move(-1); }, "aria-label": "Move earlier" }, "\u2191 Up"),
+          h("button", { class: "btn ghost small", disabled: i === rows.length - 1, onclick: function () { move(1); }, "aria-label": "Move later" }, "\u2193 Down"),
+          h("button", { class: "btn danger small", onclick: function () {
+            if (!confirm("Remove " + m.full_name + " from the list?")) return;
+            sb.from("members").delete().eq("id", m.id).select().then(function (x) { if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to delete this.")); if (m.photo_path) removeFiles([m.photo_path]); toast("Removed.", true); shell(); });
+          } }, "Delete")))));
+      });
+      if (!rows.length) box.append(h("p", { class: "muted" }, "No members yet. Click Add a member to start."));
+      return box;
     });
   }
 

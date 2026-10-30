@@ -92,6 +92,18 @@
     }).join("");
   }
 
+  function people(rows) {
+    var box = document.querySelector("[data-people]"); if (!box || !rows.length) return;
+    var yr = new Date().getFullYear();
+    box.innerHTML = rows.map(function (m) {
+      var ini = (m.full_name || "").split(/\s+/).filter(Boolean).map(function (w) { return w[0]; }).slice(0, 2).join("").toUpperCase();
+      var img = m.photo_path ? '<img src="' + esc(photoUrl(m.photo_path)) + '" alt="' + esc(m.full_name) + '" loading="lazy">' : '<div class="ph" role="img" aria-label="No photo of ' + esc(m.full_name) + '">' + esc(ini) + "</div>";
+      var svc = "";
+      if (m.member_since) { var n = yr - m.member_since; svc = "Member since " + m.member_since + (n >= 1 ? " &middot; " + n + (n === 1 ? " year" : " years") + " of service" : ""); }
+      return '<article class="person">' + img + '<div class="body"><h3>' + esc(m.full_name) + "</h3>" + (m.title ? '<p class="role">' + esc(m.title) + "</p>" : "") + (svc ? '<p class="svc">' + svc + "</p>" : "") + "</div></article>";
+    }).join("");
+  }
+
   function eventHTML(e) {
     var d = new Date(e.starts_at);
     var mon = d.toLocaleDateString("en-US", { month: "short", timeZone: TZ }), day = d.toLocaleDateString("en-US", { day: "numeric", timeZone: TZ });
@@ -293,6 +305,7 @@
   if (document.querySelector("[data-events-upcoming],[data-home-events]")) get("events?select=*&status=eq.published&order=starts_at.asc&limit=300").then(events).catch(function () {});
   if (document.querySelector("[data-news],[data-home-news]")) get("news?select=id,title,category,summary,cover_path,published_at&status=eq.published&order=published_at.desc&limit=60").then(news).catch(function () {});
   article();
+  if (document.querySelector("[data-people]")) get("members?select=*&is_active=eq.true&order=sort_order.asc").then(people).catch(function () {});
   forms();
   calls();
   get("site_settings?select=key,value").then(siteSettings).catch(function () {});

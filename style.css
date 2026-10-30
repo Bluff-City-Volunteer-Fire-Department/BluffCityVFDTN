@@ -168,3 +168,13 @@ button.btn{cursor:pointer}
 .rich li{position:relative;padding:.55rem 0 .55rem 1.5rem;border-bottom:1px solid var(--line)}
 .rich li:last-child{border-bottom:0}
 .rich li::before{content:"";position:absolute;left:0;top:1.05rem;width:.6rem;height:.6rem;background:var(--red)}
+
+.people{display:grid;gap:1.4rem;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));margin-top:2.2rem}
+.people:empty{display:none}
+.person{background:var(--bg);border:1px solid var(--line);border-top:4px solid var(--red);transition:border-color .2s,transform .2s}
+.person:hover{transform:translateY(-3px);border-color:#555;border-top-color:var(--red)}
+.person img,.person .ph{display:block;width:100%;aspect-ratio:4/5;object-fit:cover;object-position:center 20%}
+.person .ph{display:grid;place-items:center;background:#141414;color:#555;font-family:var(--head);font-size:3.4rem;font-weight:800;letter-spacing:.05em}
+.person .body{padding:1rem 1.1rem 1.2rem}.person h3{font-size:1.4rem;margin:0 0 .15rem}
+.person .role{color:#fff;font-weight:600;margin:0}.person .svc{color:var(--muted);font-size:.9rem;margin:.3rem 0 0}
+@media (prefers-reduced-motion:reduce){.person:hover{transform:none}}
