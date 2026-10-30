@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Staff Dashboard | Bluff City Volunteer Fire Department</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+button.btn{background:transparent;color:#fff}
+.top{background:var(--nav);color:#fff}.top .wrap{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:64px;max-width:none}
+.top b{font-family:var(--head);font-size:1.4rem;text-transform:uppercase;letter-spacing:.05em}.top small{opacity:.9}
+.lay{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 64px)}
+.side{background:var(--panel);border-right:1px solid var(--line);padding:1rem 0}
+.side button{display:block;width:100%;text-align:left;background:none;border:0;border-left:4px solid transparent;color:#fff;font-family:var(--head);text-transform:uppercase;letter-spacing:.06em;font-size:1.1rem;padding:.7rem 1.2rem;cursor:pointer}
+.side button:hover{background:#262626}.side button[aria-current=page]{border-left-color:var(--red);background:#262626}
+main.m{padding:2rem;max-width:1000px;width:100%}main.m h1{font-size:2.4rem}
+.f{display:block;margin-bottom:1rem}.f span{display:block;font-size:.85rem;color:var(--muted);margin-bottom:.25rem}
+input,textarea,select{width:100%;background:#0D0D0D;color:#fff;border:1px solid var(--line);border-radius:2px;padding:.6rem .7rem;font:inherit}
+input[type=checkbox]{width:auto}input[type=file]{padding:.4rem}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}
+.btn{cursor:pointer;font-size:1rem;padding:.55rem 1.1rem}.btn.small{font-size:.95rem;padding:.4rem .8rem}
+.btn.danger{background:#5a1016;color:#fff}.btn.danger:hover{background:#7a1520}
+.app{display:grid;grid-template-columns:210px 1fr;gap:1.2rem;margin-bottom:1.2rem}
+.thumb{aspect-ratio:4/3;background:#141414;display:grid;place-items:center;color:var(--muted);overflow:hidden}.thumb img{width:100%;height:100%;object-fit:cover}
+.stats{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin:1rem 0 2rem}
+.stat{background:var(--panel);border:1px solid var(--line);padding:1rem}.stat b{display:block;font-family:var(--head);font-size:2.6rem;line-height:1}
+table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid var(--line);padding:.5rem;text-align:left;font-size:.9rem;vertical-align:top}
+.toast{position:fixed;bottom:1rem;right:1rem;background:#1C1C1C;border:1px solid var(--line);border-left:5px solid var(--red);padding:.8rem 1.1rem;max-width:340px;z-index:99}
+.toast.ok{border-left-color:#2e9e5b}
+.login{max-width:420px;margin:6vh auto;padding:0 1.25rem}.login .panel{padding:2rem}
+.err{color:#ff8a8a;margin:.5rem 0}
+@media (max-width:820px){.lay{grid-template-columns:1fr}.side{display:flex;overflow-x:auto;border-right:0;border-bottom:1px solid var(--line);padding:0}.side button{white-space:nowrap;border-left:0;border-bottom:4px solid transparent}.side button[aria-current=page]{border-bottom-color:var(--red)}.app{grid-template-columns:1fr}main.m{padding:1.2rem}}
+</style></head>
+<body>
+<div id="root"><p style="padding:2rem">Loading&hellip;</p></div>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.110.1"></script>
+<script>
+(function () {
+  var C = window.BCVFD;
+  if (!window.supabase) { document.getElementById("root").textContent = "Could not load the dashboard. Check your internet connection and reload."; return; }
+  var sb = window.supabase.createClient(C.url, C.key);
+  var root = document.getElementById("root");
+  var me = null, view = "dashboard";
+
+  /* ---------- helpers ---------- */
+  function h(tag, attrs) {
+    var e = document.createElement(tag); attrs = attrs || {};
+    Object.keys(attrs).forEach(function (k) {
+      var v = attrs[k];
+      if (k === "class") e.className = v;
+      else if (k === "value" || k === "checked") e[k] = v;
+      else if (k.indexOf("on") === 0) e.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+    });
+    for (var i = 2; i < arguments.length; i++) add(e, arguments[i]);
+    return e;
+  }
+  function add(e, c) {
+    if (Array.isArray(c)) { c.forEach(function (x) { add(e, x); }); return; }
+    if (c == null || c === false) return;
+    e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  function toast(msg, ok) {
+    var t = h("div", { class: "toast" + (ok ? " ok" : ""), role: "status" }, msg);
+    document.body.append(t); setTimeout(function () { t.remove(); }, 4500);
+  }
+  function fail(e) { toast((e && e.message) ? e.message : "Something went wrong.", false); console.error(e); }
+  function ok(r) { if (r.error) throw r.error; return r; }
+  function field(label, name, val, type, rows) {
+    var inp = type === "textarea" ? h("textarea", { name: name, rows: rows || 3 }) : h("input", { name: name, type: type || "text" });
+    inp.value = val == null ? "" : val;
+    return h("label", { class: "f" }, h("span", {}, label), inp);
+  }
+  function vals(box) {
+    var o = {};
+    box.querySelectorAll("[name]").forEach(function (e) { o[e.name] = e.type === "checkbox" ? e.checked : e.value.trim(); });
+    return o;
+  }
+  function pubUrl(p) { return sb.storage.from("media").getPublicUrl(p).data.publicUrl; }
+  function compress(file, max, q) {
+    return createImageBitmap(file, { imageOrientation: "from-image" }).then(function (bmp) {
+      var s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+      var w = Math.round(bmp.width * s), hh = Math.round(bmp.height * s);
+      var c = document.createElement("canvas"); c.width = w; c.height = hh;
+      c.getContext("2d").drawImage(bmp, 0, 0, w, hh);   // redrawing also removes hidden location data
+      return new Promise(function (res) { c.toBlob(res, "image/jpeg", q); });
+    });
+  }
+  function uploadPhoto(file) {
+    if (!/^image\//.test(file.type)) return Promise.reject(new Error("Please choose a photo (JPG, PNG, or WebP)."));
+    return compress(file, 1600, 0.82).then(function (blob) {
+      var path = "uploads/" + crypto.randomUUID() + ".jpg";
+      return sb.storage.from("media").upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000" })
+        .then(function (r) { if (r.error) throw r.error; return path; });
+    });
+  }
+  function update(table, id, values) {
+    return sb.from(table).update(values).eq("id", id).select().then(function (r) {
+      if (r.error) throw r.error;
+      if (!r.data || !r.data.length) throw new Error("You do not have permission to make that change.");
+      return r.data[0];
+    });
+  }
+  function saveContent(table, key, merged) {
+    return sb.from(table).upsert({ key: key, value: merged, updated_at: new Date().toISOString() }).select().then(function (r) {
+      if (r.error) throw r.error;
+      if (!r.data || !r.data.length) throw new Error("You do not have permission to make that change.");
+    });
+  }
+  function getContent(keys) {
+    return sb.from("site_content").select("key,value").in("key", keys).then(ok).then(function (r) {
+      var o = {}; (r.data || []).forEach(function (x) { o[x.key] = x.value || {}; }); return o;
+    });
+  }
+  function fmt(d) { return d ? new Date(d).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : ""; }
+
+  /* ---------- sign-in screens ---------- */
+  function showLogin(msg) {
+    var email = h("input", { type: "email", name: "email", autocomplete: "username", required: true });
+    var pass = h("input", { type: "password", name: "password", autocomplete: "current-password", required: true });
+    var err = h("p", { class: "err", role: "alert" }, msg || "");
+    var form = h("form", { onsubmit: function (ev) {
+      ev.preventDefault(); err.textContent = "";
+      sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value }).then(function (r) {
+        if (r.error) { err.textContent = "That email or password is not correct."; return; }
+        enter(r.data.user);
+      });
+    } },
+      h("label", { class: "f" }, h("span", {}, "Email"), email),
+      h("label", { class: "f" }, h("span", {}, "Password"), pass), err,
+      h("div", { class: "row" },
+        h("button", { class: "btn primary", type: "submit" }, "Sign in"),
+        h("button", { class: "btn ghost small", type: "button", onclick: function () {
+          if (!email.value.trim()) { err.textContent = "Type your email above first, then click Forgot password."; return; }
+          sb.auth.resetPasswordForEmail(email.value.trim(), { redirectTo: location.origin + location.pathname }).then(function () {
+            err.textContent = ""; toast("If that email has an account, a reset link is on its way.", true);
+          });
+        } }, "Forgot password")));
+    root.replaceChildren(h("div", { class: "login" },
+      h("div", { class: "eyebrow" }, "Staff only"), h("h1", {}, "Dashboard sign in"),
+      h("div", { class: "panel" }, form),
+      h("p", { class: "muted", style: "margin-top:1rem" }, h("a", { href: "index.html" }, "\u2190 Back to the public website"))));
+  }
+  function showRecovery() {
+    var p1 = h("input", { type: "password", autocomplete: "new-password", minlength: 10, required: true });
+    var err = h("p", { class: "err" }, "");
+    root.replaceChildren(h("div", { class: "login" }, h("h1", {}, "Set a new password"), h("div", { class: "panel" },
+      h("form", { onsubmit: function (ev) {
+        ev.preventDefault();
+        sb.auth.updateUser({ password: p1.value }).then(function (r) {
+          if (r.error) { err.textContent = r.error.message; return; }
+          toast("Password updated.", true); enter(r.data.user);
+        });
+      } }, h("label", { class: "f" }, h("span", {}, "New password (at least 10 characters)"), p1), err,
+        h("button", { class: "btn primary", type: "submit" }, "Save password")))));
+  }
+
+  /* ---------- app shell ---------- */
+  var PERMS = {
+    none: [], contributor: ["dashboard", "account"],
+    editor: ["dashboard", "apparatus", "homepage", "contact", "account"],
+    admin: ["dashboard", "apparatus", "homepage", "contact", "users", "log", "account"]
+  };
+  var LABEL = { dashboard: "Dashboard", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
+
+  function enter(user) {
+    sb.from("profiles").select("role,email").eq("id", user.id).maybeSingle().then(function (r) {
+      me = { id: user.id, email: user.email, role: (r.data && r.data.role) || "none" };
+      view = "dashboard"; shell();
+    });
+  }
+  function shell() {
+    if (me.role === "none") {
+      root.replaceChildren(h("div", { class: "login" }, h("h1", {}, "No access yet"),
+        h("p", {}, "You are signed in as " + me.email + ", but an administrator has not given your account a role. Ask an administrator to set your role, then sign in again."),
+        h("button", { class: "btn ghost", onclick: signOut }, "Sign out")));
+      return;
+    }
+    var nav = h("nav", { class: "side", "aria-label": "Dashboard" }, PERMS[me.role].map(function (v) {
+      return h("button", { type: "button", "aria-current": v === view ? "page" : null, onclick: function () { view = v; shell(); } }, LABEL[v]);
+    }));
+    var main = h("main", { class: "m", id: "main" }, h("p", { class: "muted" }, "Loading\u2026"));
+    root.replaceChildren(
+      h("header", { class: "top" }, h("div", { class: "wrap" },
+        h("div", {}, h("b", {}, "Bluff City VFD staff dashboard"), " ", h("small", {}, me.role)),
+        h("div", { class: "row" }, h("small", {}, me.email), h("a", { class: "btn ghost small", href: "index.html", target: "_blank", rel: "noopener" }, "View site"),
+          h("button", { class: "btn ghost small", onclick: signOut }, "Sign out")))),
+      h("div", { class: "lay" }, nav, main));
+    var fn = { dashboard: vDashboard, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
+    Promise.resolve().then(fn).then(function (node) { main.replaceChildren(node); }).catch(function (e) { main.replaceChildren(h("p", { class: "err" }, "Could not load this page: " + (e.message || e))); });
+  }
+  function signOut() { sb.auth.signOut().then(function () { me = null; showLogin(); }); }
+
+  /* ---------- views ---------- */
+  function count(table, build) {
+    var q = sb.from(table).select("*", { count: "exact", head: true });
+    return (build ? build(q) : q).then(function (r) { return r.error ? "-" : r.count; });
+  }
+  function vDashboard() {
+    var jobs = [
+      count("apparatus", function (q) { return q.eq("is_active", true); }),
+      count("news", function (q) { return q.in("status", ["draft", "pending"]); }),
+      count("events", function (q) { return q.in("status", ["draft", "pending"]); }),
+      count("incidents", function (q) { return q.in("status", ["draft", "pending"]); }),
+      count("events", function (q) { return q.eq("status", "published").gte("starts_at", new Date().toISOString()); })
+    ];
+    var log = me.role === "admin" ? sb.from("audit_log").select("at,user_email,action,table_name").order("at", { ascending: false }).limit(8) : Promise.resolve({ data: [] });
+    return Promise.all(jobs.concat([log])).then(function (a) {
+      function stat(n, l) { return h("div", { class: "stat" }, h("b", {}, n), l); }
+      var can = PERMS[me.role];
+      function go(v, label) { return can.indexOf(v) > -1 ? h("button", { class: "btn primary", onclick: function () { view = v; shell(); } }, label) : null; }
+      return h("div", {}, h("h1", {}, "Dashboard"),
+        h("div", { class: "stats" }, stat(a[0], "Apparatus on the site"), stat(a[1], "News drafts waiting"), stat(a[2], "Event drafts waiting"), stat(a[3], "Incident drafts waiting"), stat(a[4], "Upcoming events")),
+        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("apparatus", "Edit apparatus"), go("homepage", "Edit homepage text"), go("contact", "Update contact info"), go("account", "Change my password")),
+        h("h2", { style: "margin-top:2.5rem" }, "Coming next"),
+        h("p", { class: "muted" }, "News, events, the community gallery, the homepage photo collage, and Recent Calls are being added in the next phases. The database for them is already in place."),
+        me.role === "admin" ? h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Recent activity"), logTable(a[5].data || [])) : null);
+    });
+  }
+
+  function vApparatus() {
+    var box = h("div", {}, h("h1", {}, "Apparatus"),
+      h("p", { class: "muted" }, "These are the vehicles shown on the Home and Apparatus pages. Photos are shrunk automatically before upload."));
+    return sb.from("apparatus").select("*").order("sort_order", { ascending: true }).then(ok).then(function (r) {
+      var rows = r.data;
+      box.append(h("div", { class: "row", style: "margin-bottom:1.5rem" }, h("button", { class: "btn primary", onclick: function () {
+        var n = prompt("Unit number for the new vehicle (for example: Engine 195)"); if (!n) return;
+        var next = rows.length ? Math.max.apply(null, rows.map(function (x) { return x.sort_order; })) + 1 : 1;
+        sb.from("apparatus").insert({ unit_number: n.trim(), sort_order: next }).then(function (x) { if (x.error) return fail(x.error); toast("Added.", true); shell(); });
+      } }, "Add a vehicle")));
+      rows.forEach(function (a, i) {
+        var thumb = h("div", { class: "thumb" }, thumbNode(a));
+        var form = h("div", {},
+          field("Unit number", "unit_number", a.unit_number), field("Type", "apparatus_type", a.apparatus_type),
+          field("Year / make / model", "year_make_model", a.year_make_model), field("Description (optional)", "description", a.description, "textarea", 2),
+          h("label", { class: "f" }, h("input", { type: "checkbox", name: "is_active", checked: a.is_active }), " Show on the website"));
+        var file = h("input", { type: "file", accept: "image/*", "aria-label": "Upload photo for " + a.unit_number, onchange: function () {
+          if (!file.files[0]) return;
+          toast("Uploading\u2026", true);
+          uploadPhoto(file.files[0]).then(function (path) {
+            var old = a.photo_path;
+            return update("apparatus", a.id, { photo_path: path }).then(function (row) {
+              a.photo_path = row.photo_path; thumb.replaceChildren(thumbNode(a)); toast("Photo saved.", true);
+              if (old) sb.storage.from("media").remove([old]);
+            });
+          }).catch(fail);
+        } });
+        function move(d) {
+          var o = rows[i + d]; if (!o) return;
+          Promise.all([update("apparatus", a.id, { sort_order: o.sort_order }), update("apparatus", o.id, { sort_order: a.sort_order })])
+            .then(function () { shell(); }).catch(fail);
+        }
+        box.append(h("div", { class: "panel app" }, h("div", {}, thumb, h("div", { style: "margin-top:.6rem" }, file)),
+          h("div", {}, form, h("div", { class: "row" },
+            h("button", { class: "btn primary", onclick: function () { update("apparatus", a.id, vals(form)).then(function () { toast("Saved.", true); }).catch(fail); } }, "Save"),
+            h("button", { class: "btn ghost small", onclick: function () { move(-1); }, disabled: i === 0, "aria-label": "Move up" }, "\u2191 Up"),
+            h("button", { class: "btn ghost small", onclick: function () { move(1); }, disabled: i === rows.length - 1, "aria-label": "Move down" }, "\u2193 Down"),
+            h("button", { class: "btn danger small", onclick: function () {
+              if (!confirm("Delete " + a.unit_number + "? This cannot be undone.")) return;
+              sb.from("apparatus").delete().eq("id", a.id).select().then(function (x) {
+                if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to delete this."));
+                if (a.photo_path) sb.storage.from("media").remove([a.photo_path]);
+                toast("Deleted.", true); shell();
+              });
+            } }, "Delete")))));
+      });
+      return box;
+    });
+  }
+  function thumbNode(a) {
+    var src = a.photo_path ? pubUrl(a.photo_path) : (a.legacy_photo || "");
+    return src ? h("img", { src: src, alt: a.unit_number }) : document.createTextNode("No photo yet");
+  }
+
+  function vHomepage() {
+    return getContent(["home_hero", "recruitment"]).then(function (c) {
+      var hero = c.home_hero || {}, rec = c.recruitment || {};
+      var f1 = h("div", {}, h("h2", {}, "Top of the homepage"),
+        field("Small line above the headline", "eyebrow", hero.eyebrow), field("Headline, first line", "headline_line_1", hero.headline_line_1),
+        field("Headline, second line (white)", "headline_line_2", hero.headline_line_2), field("Headline, red words", "headline_accent", hero.headline_accent),
+        field("Paragraph under the headline", "text", hero.text, "textarea", 3));
+      var f2 = h("div", {}, h("h2", { style: "margin-top:2rem" }, "Join Us page"),
+        field("Introduction paragraph", "text", rec.text, "textarea", 4), field("How to start", "how_to_start", rec.how_to_start, "textarea", 3));
+      return h("div", {}, h("h1", {}, "Homepage text"), f1, f2, h("button", { class: "btn primary", onclick: function () {
+        Promise.all([saveContent("site_content", "home_hero", Object.assign({}, hero, vals(f1))), saveContent("site_content", "recruitment", Object.assign({}, rec, vals(f2)))])
+          .then(function () { toast("Saved. The public site updates right away.", true); }).catch(fail);
+      } }, "Save changes"));
+    });
+  }
+
+  function vContact() {
+    return getContent(["contact", "meetings"]).then(function (c) {
+      var k = c.contact || {}, m = c.meetings || {};
+      var f = h("div", {},
+        field("Station phone", "phone", k.phone), field("Sullivan County Dispatch non-emergency number", "non_emergency_phone", k.non_emergency_phone),
+        field("Station address (street, then city, state, ZIP)", "station_address", k.station_address), field("Mailing address", "mailing_address", k.mailing_address),
+        field("Meeting information (shown on several pages)", "meetings", m.text, "textarea", 3));
+      return h("div", {}, h("h1", {}, "Contact & meetings"), f, h("button", { class: "btn primary", onclick: function () {
+        var v = vals(f), meet = v.meetings; delete v.meetings;
+        Promise.all([saveContent("site_content", "contact", Object.assign({}, k, v)), saveContent("site_content", "meetings", Object.assign({}, m, { text: meet }))])
+          .then(function () { toast("Saved. The public site updates right away.", true); }).catch(fail);
+      } }, "Save changes"));
+    });
+  }
+
+  function vUsers() {
+    return sb.from("profiles").select("id,email,role,created_at").order("created_at").then(ok).then(function (r) {
+      var t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "Email"), h("th", {}, "Role"), h("th", {}, "")));
+      r.data.forEach(function (p) {
+        var sel = h("select", { "aria-label": "Role for " + p.email }, ["none", "contributor", "editor", "admin"].map(function (x) { return h("option", { value: x, selected: x === p.role }, x); }));
+        t.append(h("tr", {}, h("td", {}, p.email), h("td", {}, sel), h("td", {}, h("button", { class: "btn primary small", onclick: function () {
+          if (p.id === me.id && sel.value !== "admin" && !confirm("You are changing your own role and may lock yourself out. Continue?")) return;
+          update("profiles", p.id, { role: sel.value }).then(function () { toast("Role updated.", true); }).catch(fail);
+        } }, "Save"))));
+      });
+      return h("div", {}, h("h1", {}, "Users & roles"),
+        h("p", { class: "muted prose" }, "Administrators: everything. Editors: edit and publish content, but not settings or users. Contributors: submit drafts only. \"none\": signed up but no access."),
+        h("p", { class: "muted prose" }, "To add a person, create their login in Supabase (Authentication, then Users, then Add user). They will appear here with no role until you set one."), t);
+    });
+  }
+  function logTable(rows) {
+    var t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "When"), h("th", {}, "Who"), h("th", {}, "What")));
+    rows.forEach(function (x) { t.append(h("tr", {}, h("td", {}, fmt(x.at)), h("td", {}, x.user_email || "system"), h("td", {}, x.action + " in " + x.table_name))); });
+    return rows.length ? t : h("p", { class: "muted" }, "No activity yet.");
+  }
+  function vLog() {
+    return sb.from("audit_log").select("at,user_email,action,table_name,record_id").order("at", { ascending: false }).limit(100).then(ok).then(function (r) {
+      return h("div", {}, h("h1", {}, "Activity log"), h("p", { class: "muted" }, "The 100 most recent changes. This history cannot be edited from the website."), logTable(r.data));
+    });
+  }
+  function vAccount() {
+    var p = h("input", { type: "password", autocomplete: "new-password", minlength: 10 });
+    return h("div", {}, h("h1", {}, "My account"), h("p", {}, "Signed in as " + me.email + " (" + me.role + ")."),
+      h("div", { class: "panel", style: "max-width:420px" }, h("h3", {}, "Change password"),
+        h("label", { class: "f" }, h("span", {}, "New password (at least 10 characters)"), p),
+        h("button", { class: "btn primary", onclick: function () {
+          if (p.value.length < 10) return fail(new Error("Use at least 10 characters."));
+          sb.auth.updateUser({ password: p.value }).then(function (r) { if (r.error) return fail(r.error); p.value = ""; toast("Password changed.", true); });
+        } }, "Update password")));
+  }
+
+  /* ---------- start ---------- */
+  var recovering = false;
+  sb.auth.onAuthStateChange(function (ev) {
+    if (ev === "PASSWORD_RECOVERY") { recovering = true; showRecovery(); }
+    if (ev === "SIGNED_OUT") { me = null; showLogin(); }
+  });
+  sb.auth.getSession().then(function (r) {
+    if (recovering) return;
+    if (r.data && r.data.session) enter(r.data.session.user); else showLogin();
+  });
+})();
+</script></body></html>
