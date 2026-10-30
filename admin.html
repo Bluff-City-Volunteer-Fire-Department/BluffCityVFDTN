@@ -41,7 +41,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
   if (!window.supabase) { document.getElementById("root").textContent = "Could not load the dashboard. Check your internet connection and reload."; return; }
   var sb = window.supabase.createClient(C.url, C.key);
   var root = document.getElementById("root");
-  var me = null, view = "dashboard";
+  var me = null, view = "dashboard", edit = null;
 
   /* ---------- helpers ---------- */
   function h(tag, attrs) {
@@ -123,7 +123,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
     var form = h("form", { onsubmit: function (ev) {
       ev.preventDefault(); err.textContent = "";
       sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value }).then(function (r) {
-        if (r.error) { err.textContent = "That email or password is not correct."; return; }
+        if (r.error) { err.textContent = /invalid login/i.test(r.error.message || "") ? "That email or password is not correct." : "Sign-in problem: " + (r.error.message || "unknown error"); return; }
         enter(r.data.user);
       });
     } },
@@ -158,16 +158,17 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
 
   /* ---------- app shell ---------- */
   var PERMS = {
-    none: [], contributor: ["dashboard", "account"],
-    editor: ["dashboard", "apparatus", "homepage", "contact", "account"],
-    admin: ["dashboard", "apparatus", "homepage", "contact", "users", "log", "account"]
+    none: [], contributor: ["dashboard", "news", "account"],
+    editor: ["dashboard", "news", "events", "apparatus", "homepage", "contact", "account"],
+    admin: ["dashboard", "news", "events", "apparatus", "homepage", "contact", "users", "log", "account"]
   };
-  var LABEL = { dashboard: "Dashboard", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
+  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
 
   function enter(user) {
     sb.from("profiles").select("role,email").eq("id", user.id).maybeSingle().then(function (r) {
+      if (r.error) { showLogin("Signed in, but your profile could not be read: " + r.error.message); return; }
       me = { id: user.id, email: user.email, role: (r.data && r.data.role) || "none" };
-      view = "dashboard"; shell();
+      view = "dashboard"; edit = null; shell();
     });
   }
   function shell() {
@@ -178,7 +179,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
       return;
     }
     var nav = h("nav", { class: "side", "aria-label": "Dashboard" }, PERMS[me.role].map(function (v) {
-      return h("button", { type: "button", "aria-current": v === view ? "page" : null, onclick: function () { view = v; shell(); } }, LABEL[v]);
+      return h("button", { type: "button", "aria-current": v === view ? "page" : null, onclick: function () { view = v; edit = null; shell(); } }, LABEL[v]);
     }));
     var main = h("main", { class: "m", id: "main" }, h("p", { class: "muted" }, "Loading\u2026"));
     root.replaceChildren(
@@ -187,7 +188,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
         h("div", { class: "row" }, h("small", {}, me.email), h("a", { class: "btn ghost small", href: "index.html", target: "_blank", rel: "noopener" }, "View site"),
           h("button", { class: "btn ghost small", onclick: signOut }, "Sign out")))),
       h("div", { class: "lay" }, nav, main));
-    var fn = { dashboard: vDashboard, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
+    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
     Promise.resolve().then(fn).then(function (node) { main.replaceChildren(node); }).catch(function (e) { main.replaceChildren(h("p", { class: "err" }, "Could not load this page: " + (e.message || e))); });
   }
   function signOut() { sb.auth.signOut().then(function () { me = null; showLogin(); }); }
@@ -212,9 +213,9 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
       function go(v, label) { return can.indexOf(v) > -1 ? h("button", { class: "btn primary", onclick: function () { view = v; shell(); } }, label) : null; }
       return h("div", {}, h("h1", {}, "Dashboard"),
         h("div", { class: "stats" }, stat(a[0], "Apparatus on the site"), stat(a[1], "News drafts waiting"), stat(a[2], "Event drafts waiting"), stat(a[3], "Incident drafts waiting"), stat(a[4], "Upcoming events")),
-        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("apparatus", "Edit apparatus"), go("homepage", "Edit homepage text"), go("contact", "Update contact info"), go("account", "Change my password")),
+        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("news", "Write news"), go("events", "Add an event"), go("apparatus", "Edit apparatus"), go("homepage", "Edit homepage text"), go("contact", "Update contact info"), go("account", "Change my password")),
         h("h2", { style: "margin-top:2.5rem" }, "Coming next"),
-        h("p", { class: "muted" }, "News, events, the community gallery, the homepage photo collage, and Recent Calls are being added in the next phases. The database for them is already in place."),
+        h("p", { class: "muted" }, "The community gallery, the homepage photo collage, and Recent Calls are being added in the next phases. The database for them is already in place."),
         me.role === "admin" ? h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Recent activity"), logTable(a[5].data || [])) : null);
     });
   }
@@ -274,16 +275,22 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
   }
 
   function vHomepage() {
-    return getContent(["home_hero", "recruitment"]).then(function (c) {
+    return getContent(["home_hero", "recruitment", "featured"]).then(function (c) {
       var hero = c.home_hero || {}, rec = c.recruitment || {};
+      var ft = Object.assign({ show: true, label: "Planned", big: "2027", title: "Community appreciation open house", text: "A day to thank the volunteers, donors, and neighbors who support the department. Date to be announced." }, c.featured || {});
       var f1 = h("div", {}, h("h2", {}, "Top of the homepage"),
         field("Small line above the headline", "eyebrow", hero.eyebrow), field("Headline, first line", "headline_line_1", hero.headline_line_1),
         field("Headline, second line (white)", "headline_line_2", hero.headline_line_2), field("Headline, red words", "headline_accent", hero.headline_accent),
         field("Paragraph under the headline", "text", hero.text, "textarea", 3));
       var f2 = h("div", {}, h("h2", { style: "margin-top:2rem" }, "Join Us page"),
         field("Introduction paragraph", "text", rec.text, "textarea", 4), field("How to start", "how_to_start", rec.how_to_start, "textarea", 3));
-      return h("div", {}, h("h1", {}, "Homepage text"), f1, f2, h("button", { class: "btn primary", onclick: function () {
-        Promise.all([saveContent("site_content", "home_hero", Object.assign({}, hero, vals(f1))), saveContent("site_content", "recruitment", Object.assign({}, rec, vals(f2)))])
+      var f3 = h("div", {}, h("h2", { style: "margin-top:2rem" }, "Featured announcement card"),
+        h("p", { class: "muted" }, "Shown with the weekly meeting card on the Home and News & Events pages. Untick the box to hide it."),
+        h("label", { class: "f" }, h("input", { type: "checkbox", name: "show", checked: ft.show !== false }), " Show this card"),
+        field("Small label (for example: Planned)", "label", ft.label), field("Big text (for example: 2027)", "big", ft.big),
+        field("Title", "title", ft.title), field("Description", "text", ft.text, "textarea", 3));
+      return h("div", {}, h("h1", {}, "Homepage text"), f1, f2, f3, h("button", { class: "btn primary", onclick: function () {
+        Promise.all([saveContent("site_content", "home_hero", Object.assign({}, hero, vals(f1))), saveContent("site_content", "recruitment", Object.assign({}, rec, vals(f2))), saveContent("site_content", "featured", Object.assign({}, ft, vals(f3)))])
           .then(function () { toast("Saved. The public site updates right away.", true); }).catch(fail);
       } }, "Save changes"));
     });
@@ -338,6 +345,137 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
           if (p.value.length < 10) return fail(new Error("Use at least 10 characters."));
           sb.auth.updateUser({ password: p.value }).then(function (r) { if (r.error) return fail(r.error); p.value = ""; toast("Password changed.", true); });
         } }, "Update password")));
+  }
+
+
+  /* ---------- news and events ---------- */
+  var NEWS_CATS = ["Department News", "Community Events", "Fire Prevention", "Training", "Fundraisers"];
+  function toLocal(iso) { if (!iso) return ""; var d = new Date(iso); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); }
+  function fromLocal(v) { return v ? new Date(v).toISOString() : null; }
+  function badge(r) {
+    if (r.status === "published") return r.published_at && new Date(r.published_at).getTime() > Date.now() ? "Scheduled for " + fmt(r.published_at) : "Published";
+    return r.status === "pending" ? "Waiting for review" : "Draft";
+  }
+  function statusField(cur) {
+    var opts = me.role === "contributor" ? ["draft", "pending"] : ["draft", "pending", "published"];
+    var names = { draft: "Draft (not public)", pending: "Ready for review", published: "Published" };
+    var sel = h("select", { name: "status" }, opts.map(function (o) { return h("option", { value: o }, names[o]); }));
+    sel.value = opts.indexOf(cur) > -1 ? cur : "draft";
+    return h("label", { class: "f" }, h("span", {}, "Status"), sel);
+  }
+  function photoPicker(initial, label) {
+    var path = initial || null, box = h("div", { class: "thumb", style: "max-width:320px" });
+    function draw() { box.replaceChildren(path ? h("img", { src: pubUrl(path), alt: "" }) : document.createTextNode("No photo")); }
+    draw();
+    var file = h("input", { type: "file", accept: "image/*", "aria-label": label, onchange: function () {
+      if (!file.files[0]) return; toast("Uploading\u2026", true);
+      uploadPhoto(file.files[0]).then(function (p) { path = p; draw(); toast("Photo added. Click Save to keep it.", true); }).catch(fail);
+    } });
+    return { node: h("div", { class: "f" }, h("span", { class: "muted" }, label), box, h("div", { class: "row", style: "margin-top:.5rem" }, file,
+      h("button", { class: "btn ghost small", type: "button", onclick: function () { path = null; draw(); } }, "Remove photo"))), get: function () { return path; } };
+  }
+  function multiPhotos(initial, label) {
+    var list = (initial || []).slice(), box = h("div", { class: "row" });
+    function draw() {
+      box.replaceChildren.apply(box, list.map(function (p, i) {
+        return h("div", { style: "width:120px" }, h("div", { class: "thumb" }, h("img", { src: pubUrl(p), alt: "" })),
+          h("button", { class: "btn ghost small", type: "button", onclick: function () { list.splice(i, 1); draw(); } }, "Remove"));
+      }));
+    }
+    draw();
+    var file = h("input", { type: "file", accept: "image/*", multiple: true, "aria-label": label, onchange: function () {
+      var files = Array.prototype.slice.call(file.files); if (!files.length) return; toast("Uploading " + files.length + " photo(s)\u2026", true);
+      files.reduce(function (p, f) { return p.then(function () { return uploadPhoto(f).then(function (path) { list.push(path); draw(); }); }); }, Promise.resolve())
+        .then(function () { toast("Photos added. Click Save to keep them.", true); }).catch(fail);
+    } });
+    return { node: h("div", { class: "f" }, h("span", { class: "muted" }, label), box, h("div", { style: "margin-top:.5rem" }, file)), get: function () { return list.slice(); } };
+  }
+  function filterBar(cur, set) {
+    return h("div", { class: "row", style: "margin:1rem 0" }, [["all", "All"], ["draft", "Drafts"], ["pending", "Waiting for review"], ["published", "Published"]].map(function (x) {
+      return h("button", { class: "btn small " + (cur === x[0] ? "primary" : "ghost"), onclick: function () { set(x[0]); } }, x[1]);
+    }));
+  }
+  function leave() { edit = null; shell(); }
+  function removeFiles(paths) { paths = paths.filter(Boolean); if (paths.length) sb.storage.from("media").remove(paths); }
+  function deleteBtn(table, rec, paths) {
+    return h("button", { class: "btn danger", type: "button", onclick: function () {
+      if (!confirm("Delete this permanently? This cannot be undone.")) return;
+      sb.from(table).delete().eq("id", rec.id).select().then(function (x) {
+        if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to delete this."));
+        removeFiles(paths()); toast("Deleted.", true); leave();
+      });
+    } }, "Delete");
+  }
+  function saveRow(table, rec, row) {
+    var p = rec.id ? update(table, rec.id, row) : sb.from(table).insert(row).select().then(ok);
+    return p.then(function () { toast(row.status === "published" ? "Saved and published." : "Saved.", true); leave(); }).catch(fail);
+  }
+
+  var newsFilter = "all";
+  function vNews() {
+    if (edit && edit.kind === "news") return newsEditor(edit.rec);
+    return sb.from("news").select("id,title,category,status,published_at,created_at").order("created_at", { ascending: false }).limit(300).then(ok).then(function (r) {
+      var rows = r.data.filter(function (x) { return newsFilter === "all" || x.status === newsFilter; });
+      var t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "Title"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")));
+      rows.forEach(function (x) { t.append(h("tr", {}, h("td", {}, x.title), h("td", {}, x.category), h("td", {}, badge(x)),
+        h("td", {}, h("button", { class: "btn ghost small", onclick: function () {
+          sb.from("news").select("*").eq("id", x.id).single().then(ok).then(function (q) { edit = { kind: "news", rec: q.data }; shell(); }).catch(fail);
+        } }, "Edit")))); });
+      return h("div", {}, h("h1", {}, "News"),
+        h("p", { class: "muted prose" }, me.role === "contributor" ? "Write an article and mark it Ready for review. An editor will publish it." : "Write, schedule, and publish news articles."),
+        h("button", { class: "btn primary", onclick: function () { edit = { kind: "news", rec: { category: "Department News", status: "draft" } }; shell(); } }, "New article"),
+        filterBar(newsFilter, function (f) { newsFilter = f; shell(); }), rows.length ? t : h("p", { class: "muted" }, "Nothing here yet."));
+    });
+  }
+  function newsEditor(rec) {
+    var cover = photoPicker(rec.cover_path, "Cover photo"), extra = multiPhotos(rec.extra_paths, "Additional photos");
+    var cat = h("select", { name: "category" }, NEWS_CATS.map(function (c) { return h("option", { value: c }, c); })); cat.value = rec.category || "Department News";
+    var f = h("div", {}, field("Title", "title", rec.title), h("label", { class: "f" }, h("span", {}, "Category"), cat),
+      field("Short summary (shown on the news list)", "summary", rec.summary, "textarea", 2), field("Article (leave a blank line between paragraphs)", "body", rec.body, "textarea", 12),
+      cover.node, extra.node, statusField(rec.status),
+      h("label", { class: "f" }, h("span", {}, "Publish date and time (leave empty to publish right away; a future time schedules it)"), h("input", { type: "datetime-local", name: "published_at_local", value: toLocal(rec.published_at) })));
+    return h("div", {}, h("h1", {}, rec.id ? "Edit article" : "New article"), f, h("div", { class: "row" },
+      h("button", { class: "btn primary", onclick: function () {
+        var v = vals(f); if (!v.title) return fail(new Error("Please enter a title."));
+        saveRow("news", rec, { title: v.title, category: v.category, summary: v.summary || null, body: v.body || null, cover_path: cover.get(), extra_paths: extra.get(),
+          status: v.status, published_at: v.status === "published" ? fromLocal(v.published_at_local) : null });
+      } }, "Save"), h("button", { class: "btn ghost", onclick: leave }, "Cancel"),
+      rec.id ? deleteBtn("news", rec, function () { return [cover.get()].concat(extra.get()); }) : null));
+  }
+
+  var evFilter = "all";
+  function vEvents() {
+    if (edit && edit.kind === "events") return eventEditor(edit.rec);
+    return sb.from("events").select("id,name,starts_at,status,published_at").order("starts_at", { ascending: false }).limit(300).then(ok).then(function (r) {
+      var now = Date.now(), rows = r.data.filter(function (x) { return evFilter === "all" || x.status === evFilter; });
+      var up = rows.filter(function (x) { return new Date(x.starts_at).getTime() >= now; }).reverse(), past = rows.filter(function (x) { return new Date(x.starts_at).getTime() < now; });
+      function table(list) {
+        var t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "Event"), h("th", {}, "When"), h("th", {}, "Status"), h("th", {}, "")));
+        list.forEach(function (x) { t.append(h("tr", {}, h("td", {}, x.name), h("td", {}, fmt(x.starts_at)), h("td", {}, badge(x)), h("td", {}, h("button", { class: "btn ghost small", onclick: function () {
+          sb.from("events").select("*").eq("id", x.id).single().then(ok).then(function (q) { edit = { kind: "events", rec: q.data }; shell(); }).catch(fail);
+        } }, "Edit")))); });
+        return list.length ? t : h("p", { class: "muted" }, "Nothing here yet.");
+      }
+      return h("div", {}, h("h1", {}, "Events"),
+        h("p", { class: "muted prose" }, "Upcoming events appear on the public site in date order and move to the archive automatically after they end."),
+        h("button", { class: "btn primary", onclick: function () { edit = { kind: "events", rec: { status: "draft" } }; shell(); } }, "Add an event"),
+        filterBar(evFilter, function (f) { evFilter = f; shell(); }), h("h2", {}, "Upcoming"), table(up), h("h2", { style: "margin-top:2rem" }, "Past events"), table(past));
+    });
+  }
+  function eventEditor(rec) {
+    var photo = photoPicker(rec.photo_path, "Event photo");
+    var f = h("div", {}, field("Event name", "name", rec.name), field("Starts", "starts_local", toLocal(rec.starts_at), "datetime-local"),
+      field("Ends (optional)", "ends_local", toLocal(rec.ends_at), "datetime-local"), field("Location", "location", rec.location),
+      field("Description", "description", rec.description, "textarea", 6), field("Public contact information (optional)", "contact_info", rec.contact_info),
+      photo.node, statusField(rec.status),
+      h("label", { class: "f" }, h("span", {}, "Publish date and time (leave empty to publish right away)"), h("input", { type: "datetime-local", name: "published_at_local", value: toLocal(rec.published_at) })));
+    return h("div", {}, h("h1", {}, rec.id ? "Edit event" : "Add an event"), f, h("div", { class: "row" },
+      h("button", { class: "btn primary", onclick: function () {
+        var v = vals(f); if (!v.name) return fail(new Error("Please enter the event name.")); if (!v.starts_local) return fail(new Error("Please choose when the event starts."));
+        saveRow("events", rec, { name: v.name, starts_at: fromLocal(v.starts_local), ends_at: fromLocal(v.ends_local), location: v.location || null, description: v.description || null,
+          contact_info: v.contact_info || null, photo_path: photo.get(), status: v.status, published_at: v.status === "published" ? fromLocal(v.published_at_local) : null });
+      } }, "Save"), h("button", { class: "btn ghost", onclick: leave }, "Cancel"),
+      rec.id ? deleteBtn("events", rec, function () { return [photo.get()]; }) : null));
   }
 
   /* ---------- start ---------- */
