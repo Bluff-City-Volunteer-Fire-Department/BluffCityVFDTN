@@ -69,8 +69,8 @@
     featured(c.featured);
     var ab = c.about || {};
     document.querySelectorAll("[data-para]").forEach(function (el) { var v = (ab[el.getAttribute("data-para").split(".")[1]] || ""); if (v) el.innerHTML = para(v); });
-    if (r.what_to_expect) document.querySelectorAll('[data-content="recruitment.what_to_expect"]').forEach(function (el) { el.textContent = r.what_to_expect; });
-    if (r.who_can_apply) document.querySelectorAll('[data-content="recruitment.who_can_apply"]').forEach(function (el) { el.textContent = r.who_can_apply; });
+    if (r.what_to_expect) document.querySelectorAll('[data-rich="recruitment.what_to_expect"]').forEach(function (el) { el.innerHTML = rich(r.what_to_expect); });
+    if (r.who_can_apply) document.querySelectorAll('[data-rich="recruitment.who_can_apply"]').forEach(function (el) { el.innerHTML = rich(r.who_can_apply); });
     var h = c.home_hero || {};
     function hero(name, fn) { var el = document.querySelector('[data-hero="' + name + '"]'); if (el) fn(el); }
     if (h.eyebrow) hero("eyebrow", function (el) { el.textContent = h.eyebrow; });
@@ -84,6 +84,14 @@
   var TZ = "America/New_York";
   function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: TZ }) : ""; }
   function para(t) { return String(t || "").split(/\n\s*\n/).map(function (p) { return "<p>" + esc(p).replace(/\n/g, "<br>") + "</p>"; }).join(""); }
+  function rich(t) {
+    return String(t || "").split(/\n\s*\n/).map(function (b) {
+      var lines = b.split("\n").map(function (l) { return l.trim(); }).filter(Boolean); if (!lines.length) return "";
+      if (lines.every(function (l) { return /^[-\u2022*]\s+/.test(l); })) return "<ul>" + lines.map(function (l) { return "<li>" + esc(l.replace(/^[-\u2022*]\s+/, "")) + "</li>"; }).join("") + "</ul>";
+      return "<p>" + esc(lines.join("\n")).replace(/\n/g, "<br>") + "</p>";
+    }).join("");
+  }
+
   function eventHTML(e) {
     var d = new Date(e.starts_at);
     var mon = d.toLocaleDateString("en-US", { month: "short", timeZone: TZ }), day = d.toLocaleDateString("en-US", { day: "numeric", timeZone: TZ });

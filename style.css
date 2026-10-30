@@ -153,3 +153,18 @@ button.btn{cursor:pointer}
   nav ul{justify-content:space-between}
   nav a{padding:.85rem .35rem;font-size:1.02rem}
 }
+
+.join-grid{display:grid;gap:1.4rem;grid-template-columns:1.3fr 1fr 1fr}
+@media (max-width:960px){.join-grid{grid-template-columns:1fr}}
+.jcard{position:relative;background:var(--bg);border:1px solid var(--line);border-top:5px solid var(--red);padding:2rem 1.8rem 1.8rem;transition:border-color .2s,transform .2s}
+.jcard:hover{transform:translateY(-3px);border-color:#555;border-top-color:var(--red)}
+.jcard .num{position:absolute;top:.4rem;right:1.1rem;font-family:var(--head);font-weight:800;font-size:4.6rem;line-height:1;color:#262626}
+.jcard h3{font-size:1.9rem;margin-bottom:1rem;padding-right:4rem}
+.jcard.go{background:var(--nav);border-color:var(--nav);border-top-color:#fff}
+.jcard.go .num{color:rgba(255,255,255,.22)}.jcard.go a:not(.btn){color:#fff}
+.btn.light{background:#fff;color:#0D0D0D}.btn.light:hover{background:#e6e6e6;transform:translateY(-2px)}
+.rich:empty{display:none}.rich p{margin:0 0 .9rem}
+.rich ul{list-style:none;padding:0;margin:0 0 .9rem}
+.rich li{position:relative;padding:.55rem 0 .55rem 1.5rem;border-bottom:1px solid var(--line)}
+.rich li:last-child{border-bottom:0}
+.rich li::before{content:"";position:absolute;left:0;top:1.05rem;width:.6rem;height:.6rem;background:var(--red)}

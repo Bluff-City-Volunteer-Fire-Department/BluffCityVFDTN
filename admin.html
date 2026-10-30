@@ -725,7 +725,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
         field("Our volunteers (public membership information)", "membership_info", a.membership_info, "textarea", 5));
       var f2 = h("div", {}, h("h2", { style: "margin-top:2rem" }, "Join Us page"),
         field("What to expect", "what_to_expect", r.what_to_expect, "textarea", 3), field("Who can apply", "who_can_apply", r.who_can_apply, "textarea", 3),
-        h("p", { class: "muted" }, "The introduction and \"How to start\" text are under Homepage text."));
+        h("p", { class: "muted" }, "Tip: start each line with a dash and a space (- ) to make a bulleted list. Leave a blank line between paragraphs. The introduction and \"How to start\" text are under Homepage text."));
       return h("div", {}, h("h1", {}, "Department info"), f1, f2, h("button", { class: "btn primary", onclick: function () {
         Promise.all([saveContent("site_content", "about", Object.assign({}, a, vals(f1))), saveContent("site_content", "recruitment", Object.assign({}, r, vals(f2)))])
           .then(function () { toast("Saved. The public site updates right away.", true); }).catch(fail);
