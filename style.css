@@ -34,3 +34,6 @@ section{padding:3rem 0}section.alt{background:var(--steel)}section h2{font-size:
 footer{background:var(--navy);color:#c3ccd6;padding:2rem 0;font-size:.95rem}footer a{color:#e8c777}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 .pic{display:block;width:100%;height:auto;border-radius:4px}
+.pic.card{aspect-ratio:4/3;object-fit:cover;object-position:center 40%}
+.pic.wide{aspect-ratio:16/9;object-fit:cover;object-position:center 55%}
+figure{margin:0}figcaption{font-size:.95rem;color:#4a5865;margin-top:.5rem}
