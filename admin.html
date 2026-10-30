@@ -87,12 +87,16 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
       return new Promise(function (res) { c.toBlob(res, "image/jpeg", q); });
     });
   }
-  function uploadPhoto(file) {
+  function putBlob(path, blob) {
+    return sb.storage.from("media").upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000" }).then(function (r) { if (r.error) throw r.error; });
+  }
+  function thumbPath(p) { return /\.jpg$/.test(p) ? p.replace(/\.jpg$/, "_t.jpg") : p; }
+  function uploadPhoto(file, withThumb) {
     if (!/^image\//.test(file.type)) return Promise.reject(new Error("Please choose a photo (JPG, PNG, or WebP)."));
-    return compress(file, 1600, 0.82).then(function (blob) {
-      var path = "uploads/" + crypto.randomUUID() + ".jpg";
-      return sb.storage.from("media").upload(path, blob, { contentType: "image/jpeg", cacheControl: "31536000" })
-        .then(function (r) { if (r.error) throw r.error; return path; });
+    var path = "uploads/" + crypto.randomUUID() + ".jpg";
+    return compress(file, 1600, 0.82).then(function (blob) { return putBlob(path, blob); }).then(function () {
+      if (!withThumb) return path;
+      return compress(file, 480, 0.75).then(function (tb) { return putBlob(thumbPath(path), tb); }).then(function () { return path; });
     });
   }
   function update(table, id, values) {
@@ -158,11 +162,11 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
 
   /* ---------- app shell ---------- */
   var PERMS = {
-    none: [], contributor: ["dashboard", "news", "account"],
-    editor: ["dashboard", "news", "events", "apparatus", "homepage", "contact", "account"],
-    admin: ["dashboard", "news", "events", "apparatus", "homepage", "contact", "users", "log", "account"]
+    none: [], contributor: ["dashboard", "news", "gallery", "account"],
+    editor: ["dashboard", "news", "events", "gallery", "collage", "apparatus", "homepage", "contact", "account"],
+    admin: ["dashboard", "news", "events", "gallery", "collage", "apparatus", "homepage", "contact", "users", "log", "account"]
   };
-  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
+  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", gallery: "Gallery", collage: "Homepage collage", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
 
   function enter(user) {
     sb.from("profiles").select("role,email").eq("id", user.id).maybeSingle().then(function (r) {
@@ -188,7 +192,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
         h("div", { class: "row" }, h("small", {}, me.email), h("a", { class: "btn ghost small", href: "index.html", target: "_blank", rel: "noopener" }, "View site"),
           h("button", { class: "btn ghost small", onclick: signOut }, "Sign out")))),
       h("div", { class: "lay" }, nav, main));
-    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
+    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, gallery: vGallery, collage: vCollage, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
     Promise.resolve().then(fn).then(function (node) { main.replaceChildren(node); }).catch(function (e) { main.replaceChildren(h("p", { class: "err" }, "Could not load this page: " + (e.message || e))); });
   }
   function signOut() { sb.auth.signOut().then(function () { me = null; showLogin(); }); }
@@ -213,9 +217,9 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
       function go(v, label) { return can.indexOf(v) > -1 ? h("button", { class: "btn primary", onclick: function () { view = v; shell(); } }, label) : null; }
       return h("div", {}, h("h1", {}, "Dashboard"),
         h("div", { class: "stats" }, stat(a[0], "Apparatus on the site"), stat(a[1], "News drafts waiting"), stat(a[2], "Event drafts waiting"), stat(a[3], "Incident drafts waiting"), stat(a[4], "Upcoming events")),
-        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("news", "Write news"), go("events", "Add an event"), go("apparatus", "Edit apparatus"), go("homepage", "Edit homepage text"), go("contact", "Update contact info"), go("account", "Change my password")),
+        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("news", "Write news"), go("gallery", "Add photos"), go("events", "Add an event"), go("apparatus", "Edit apparatus"), go("homepage", "Edit homepage text"), go("contact", "Update contact info"), go("account", "Change my password")),
         h("h2", { style: "margin-top:2.5rem" }, "Coming next"),
-        h("p", { class: "muted" }, "The community gallery, the homepage photo collage, and Recent Calls are being added in the next phases. The database for them is already in place."),
+        h("p", { class: "muted" }, "Recent Calls is being added in the next phase. The database for it is already in place."),
         me.role === "admin" ? h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Recent activity"), logTable(a[5].data || [])) : null);
     });
   }
@@ -476,6 +480,127 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
           contact_info: v.contact_info || null, photo_path: photo.get(), status: v.status, published_at: v.status === "published" ? fromLocal(v.published_at_local) : null });
       } }, "Save"), h("button", { class: "btn ghost", onclick: leave }, "Cancel"),
       rec.id ? deleteBtn("events", rec, function () { return [photo.get()]; }) : null));
+  }
+
+
+  /* ---------- gallery ---------- */
+  var ALBUM_CATS = ["Community Events", "Fire Prevention & Education", "Department Training", "Fundraisers", "Department Activities", "Historical Photographs"];
+  var galFilter = "all";
+  function vGallery() {
+    if (edit && edit.kind === "album") return albumEditor(edit.rec);
+    return sb.from("albums").select("id,title,category,status,published_at,event_date,created_at").order("created_at", { ascending: false }).limit(300).then(ok).then(function (r) {
+      var rows = r.data.filter(function (x) { return galFilter === "all" || x.status === galFilter; });
+      var t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "Album"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")));
+      rows.forEach(function (x) { t.append(h("tr", {}, h("td", {}, x.title), h("td", {}, x.category), h("td", {}, badge(x)), h("td", {}, h("button", { class: "btn ghost small", onclick: function () {
+        sb.from("albums").select("*").eq("id", x.id).single().then(ok).then(function (q) { edit = { kind: "album", rec: q.data }; shell(); }).catch(fail);
+      } }, "Open")))); });
+      return h("div", {}, h("h1", {}, "Community gallery"),
+        h("p", { class: "muted prose" }, me.role === "contributor" ? "Create an album, add photos, and mark it Ready for review. An editor will publish it." : "Create albums, add many photos at once, and publish them to the Community Gallery."),
+        h("button", { class: "btn primary", onclick: function () { edit = { kind: "album", rec: { category: "Community Events", status: "draft" } }; shell(); } }, "New album"),
+        filterBar(galFilter, function (f) { galFilter = f; shell(); }), rows.length ? t : h("p", { class: "muted" }, "No albums yet."));
+    });
+  }
+  function nextOrder(rows) { return rows.length ? Math.max.apply(null, rows.map(function (x) { return x.sort_order; })) + 1 : 1; }
+  function albumEditor(rec) {
+    var cat = h("select", { name: "category" }, ALBUM_CATS.map(function (c) { return h("option", { value: c }, c); })); cat.value = rec.category || ALBUM_CATS[0];
+    var f = h("div", {}, field("Album title", "title", rec.title), h("label", { class: "f" }, h("span", {}, "Category"), cat),
+      field("Event date", "event_date", rec.event_date, "date"), field("Description", "description", rec.description, "textarea", 3), statusField(rec.status),
+      h("label", { class: "f" }, h("span", {}, "Publish date and time (leave empty to publish right away)"), h("input", { type: "datetime-local", name: "published_at_local", value: toLocal(rec.published_at) })));
+    var photosBox = h("div", {});
+    function saveAlbum() {
+      var v = vals(f); if (!v.title) return fail(new Error("Please enter an album title."));
+      var row = { title: v.title, category: v.category, event_date: v.event_date || null, description: v.description || null, cover_path: rec.cover_path || null,
+        status: v.status, published_at: v.status === "published" ? fromLocal(v.published_at_local) : null };
+      var p = rec.id ? update("albums", rec.id, row) : sb.from("albums").insert(row).select().single().then(ok).then(function (x) { return x.data; });
+      p.then(function (saved) { toast("Saved.", true); edit = { kind: "album", rec: saved }; shell(); }).catch(fail);
+    }
+    var top = h("div", {}, h("h1", {}, rec.id ? "Edit album" : "New album"), f, h("div", { class: "row" },
+      h("button", { class: "btn primary", onclick: saveAlbum }, rec.id ? "Save album details" : "Create album and add photos"), h("button", { class: "btn ghost", onclick: leave }, "Back to albums")));
+    if (!rec.id) return top;
+    return sb.from("album_photos").select("*").eq("album_id", rec.id).order("sort_order", { ascending: true }).then(ok).then(function (r) {
+      var photos = r.data;
+      function draw() {
+        photosBox.replaceChildren(h("h2", { style: "margin-top:2.5rem" }, "Photos (" + photos.length + ")"),
+          h("p", { class: "muted" }, "Photos are shrunk automatically so the gallery loads quickly. Add as many as you like at once."),
+          h("div", { class: "grid", style: "grid-template-columns:repeat(auto-fill,minmax(240px,1fr))" }, photos.map(function (p, i) {
+            var cap = h("input", { type: "text", value: p.caption || "", placeholder: "Caption (optional)", "aria-label": "Caption", onchange: function () { update("album_photos", p.id, { caption: cap.value.trim() || null }).then(function () { p.caption = cap.value.trim(); toast("Caption saved.", true); }).catch(fail); } });
+            function move(d) { var o = photos[i + d]; if (!o) return; Promise.all([update("album_photos", p.id, { sort_order: o.sort_order }), update("album_photos", o.id, { sort_order: p.sort_order })])
+              .then(function () { var t = p.sort_order; p.sort_order = o.sort_order; o.sort_order = t; photos.sort(function (a, b) { return a.sort_order - b.sort_order; }); draw(); }).catch(fail); }
+            return h("div", { class: "panel", style: "padding:.8rem" }, h("div", { class: "thumb" }, h("img", { src: pubUrl(thumbPath(p.path)), alt: p.caption || "" })), cap,
+              h("div", { class: "row", style: "margin-top:.5rem" },
+                h("button", { class: "btn ghost small", disabled: i === 0, onclick: function () { move(-1); }, "aria-label": "Move earlier" }, "\u2190"),
+                h("button", { class: "btn ghost small", disabled: i === photos.length - 1, onclick: function () { move(1); }, "aria-label": "Move later" }, "\u2192"),
+                h("button", { class: "btn ghost small", onclick: function () { update("albums", rec.id, { cover_path: p.path }).then(function () { rec.cover_path = p.path; toast("Cover photo set.", true); draw(); }).catch(fail); } }, rec.cover_path === p.path ? "\u2605 Cover" : "Make cover"),
+                h("button", { class: "btn danger small", onclick: function () {
+                  if (!confirm("Delete this photo?")) return;
+                  sb.from("album_photos").delete().eq("id", p.id).select().then(function (x) {
+                    if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to delete this."));
+                    removeFiles([p.path, thumbPath(p.path)]); photos.splice(i, 1);
+                    if (rec.cover_path === p.path) { rec.cover_path = photos[0] ? photos[0].path : null; update("albums", rec.id, { cover_path: rec.cover_path }); }
+                    draw();
+                  });
+                } }, "Delete")));
+          })));
+        photosBox.append(h("div", { class: "f", style: "margin-top:1.5rem" }, h("span", { class: "muted" }, "Add photos"), addInput()));
+      }
+      function addInput() {
+        var file = h("input", { type: "file", accept: "image/*", multiple: true, "aria-label": "Add photos to this album", onchange: function () {
+          var files = Array.prototype.slice.call(file.files); if (!files.length) return; var n = 0;
+          toast("Uploading " + files.length + " photo(s). Please keep this page open.", true);
+          files.reduce(function (pr, fl) { return pr.then(function () {
+            return uploadPhoto(fl, true).then(function (path) {
+              return sb.from("album_photos").insert({ album_id: rec.id, path: path, sort_order: nextOrder(photos) }).select().single().then(ok).then(function (x) {
+                photos.push(x.data); n++;
+                if (!rec.cover_path) { rec.cover_path = path; return update("albums", rec.id, { cover_path: path }); }
+              });
+            });
+          }); }, Promise.resolve()).then(function () { toast(n + " photo(s) added.", true); draw(); }).catch(function (e) { fail(e); draw(); });
+        } });
+        return file;
+      }
+      draw();
+      var bottom = h("div", { class: "row", style: "margin-top:2.5rem" }, deleteBtn("albums", rec, function () {
+        return photos.reduce(function (a, p) { return a.concat([p.path, thumbPath(p.path)]); }, []); }));
+      return h("div", {}, top, photosBox, bottom);
+    });
+  }
+
+  /* ---------- homepage collage ---------- */
+  function vCollage() {
+    return sb.from("homepage_photos").select("*").order("sort_order", { ascending: true }).then(ok).then(function (r) {
+      var rows = r.data, box = h("div", {});
+      function draw() {
+        box.replaceChildren(h("div", { class: "grid", style: "grid-template-columns:repeat(auto-fill,minmax(260px,1fr))" }, rows.map(function (p, i) {
+          var show = h("input", { type: "checkbox", checked: p.is_featured, onchange: function () { update("homepage_photos", p.id, { is_featured: show.checked }).then(function () { p.is_featured = show.checked; toast("Saved.", true); }).catch(function (e) { show.checked = !show.checked; fail(e); }); } });
+          function move(d) { var o = rows[i + d]; if (!o) return; Promise.all([update("homepage_photos", p.id, { sort_order: o.sort_order }), update("homepage_photos", o.id, { sort_order: p.sort_order })])
+            .then(function () { var t = p.sort_order; p.sort_order = o.sort_order; o.sort_order = t; rows.sort(function (a, b) { return a.sort_order - b.sort_order; }); draw(); }).catch(fail); }
+          var rep = h("input", { type: "file", accept: "image/*", "aria-label": "Replace this photo", onchange: function () {
+            if (!rep.files[0]) return; toast("Uploading\u2026", true);
+            uploadPhoto(rep.files[0], false).then(function (path) { var old = p.path; return update("homepage_photos", p.id, { path: path }).then(function () { p.path = path; removeFiles([old]); draw(); toast("Photo replaced.", true); }); }).catch(fail);
+          } });
+          return h("div", { class: "panel", style: "padding:.8rem" }, h("div", { class: "thumb" }, h("img", { src: pubUrl(p.path), alt: "" })),
+            h("label", { class: "f", style: "margin:.6rem 0" }, show, " Show on homepage" + (i === 0 ? " (largest)" : "")),
+            h("div", { class: "row" }, h("button", { class: "btn ghost small", disabled: i === 0, onclick: function () { move(-1); }, "aria-label": "Move earlier" }, "\u2190"),
+              h("button", { class: "btn ghost small", disabled: i === rows.length - 1, onclick: function () { move(1); }, "aria-label": "Move later" }, "\u2192"),
+              h("button", { class: "btn danger small", onclick: function () {
+                if (!confirm("Remove this photo from the collage?")) return;
+                sb.from("homepage_photos").delete().eq("id", p.id).select().then(function (x) { if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission.")); removeFiles([p.path]); rows.splice(i, 1); draw(); });
+              } }, "Delete")),
+            h("div", { style: "margin-top:.6rem" }, h("span", { class: "muted" }, "Replace with another photo"), rep));
+        })));
+      }
+      draw();
+      var add = h("input", { type: "file", accept: "image/*", multiple: true, "aria-label": "Add photos to the collage", onchange: function () {
+        var files = Array.prototype.slice.call(add.files); if (!files.length) return; toast("Uploading\u2026", true);
+        files.reduce(function (pr, fl) { return pr.then(function () { return uploadPhoto(fl, false).then(function (path) {
+          return sb.from("homepage_photos").insert({ path: path, sort_order: nextOrder(rows), is_featured: true }).select().single().then(ok).then(function (x) { rows.push(x.data); }); }); }); }, Promise.resolve())
+          .then(function () { toast("Photos added.", true); draw(); }).catch(function (e) { fail(e); draw(); });
+      } });
+      return h("div", {}, h("h1", {}, "Homepage collage"),
+        h("p", { class: "muted prose" }, "The top of the homepage shows up to five photos that are switched on. The first one is shown largest. Use real department photos only: apparatus, training, events, and members who have agreed to be photographed."),
+        h("div", { class: "f" }, h("span", { class: "muted" }, "Add photos"), add), box,
+        rows.length ? null : h("p", { class: "muted" }, "No collage photos yet, so the homepage shows the default Engine 192 photo."));
+    });
   }
 
   /* ---------- start ---------- */

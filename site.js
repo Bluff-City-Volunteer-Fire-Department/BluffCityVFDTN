@@ -126,9 +126,67 @@
     }).catch(function () { box.innerHTML = "<p>This article could not be loaded right now. Please try again later.</p>"; });
   }
 
+  function thumbOf(p) { return /\.jpg$/.test(p) ? p.replace(/\.jpg$/, "_t.jpg") : p; }
+  function collage(rows) {
+    var box = document.querySelector("[data-collage]"); if (!box || !rows.length) return;
+    var n = Math.min(rows.length, 5);
+    if (n < 2) { var hero = box.parentNode; hero.style.backgroundImage = "url('" + photoUrl(rows[0].path) + "')"; return; }
+    box.className = "collage c" + n;
+    box.innerHTML = rows.slice(0, n).map(function (r) { return '<img src="' + esc(photoUrl(r.path)) + '" alt="">'; }).join("");
+  }
+  /* ----- gallery ----- */
+  function lightbox(items) {
+    var lb = document.querySelector(".lb"), img = lb.querySelector("img"), cap = lb.querySelector("figcaption"), i = 0, opener = null, x0 = null;
+    function show(k) { i = (k + items.length) % items.length; img.src = photoUrl(items[i].path); img.alt = items[i].caption || ""; cap.textContent = items[i].caption || ""; }
+    function open(k, el) { opener = el; show(k); lb.hidden = false; document.body.style.overflow = "hidden"; lb.querySelector(".lb-x").focus(); }
+    function close() { lb.hidden = true; document.body.style.overflow = ""; if (opener) opener.focus(); }
+    lb.querySelector(".lb-x").onclick = close; lb.querySelector(".lb-p").onclick = function () { show(i - 1); }; lb.querySelector(".lb-n").onclick = function () { show(i + 1); };
+    lb.addEventListener("click", function (e) { if (e.target === lb) close(); });
+    document.addEventListener("keydown", function (e) { if (lb.hidden) return; if (e.key === "Escape") close(); if (e.key === "ArrowLeft") show(i - 1); if (e.key === "ArrowRight") show(i + 1); });
+    lb.addEventListener("touchstart", function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+    lb.addEventListener("touchend", function (e) { if (x0 == null) return; var dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) show(i + (dx < 0 ? 1 : -1)); });
+    return open;
+  }
+  function gallery() {
+    var box = document.getElementById("gal"); if (!box) return;
+    var id = new URLSearchParams(location.search).get("album");
+    if (id) {
+      if (!/^[0-9a-f-]{36}$/i.test(id)) { box.innerHTML = "<p>That album could not be found.</p>"; return; }
+      Promise.all([get("albums?select=*&id=eq." + id), get("album_photos?select=*&album_id=eq." + id + "&order=sort_order.asc")]).then(function (r) {
+        var a = r[0][0], ph = r[1]; if (!a) { box.innerHTML = "<p>That album could not be found.</p>"; return; }
+        document.title = a.title + " | Bluff City Volunteer Fire Department";
+        box.innerHTML = '<p><a href="gallery.html">&larr; All albums</a></p><div class="eyebrow">' + esc(a.category) + (a.event_date ? " &middot; " + esc(fmtDate(a.event_date + "T12:00:00Z")) : "") + "</div><h2>" + esc(a.title) + "</h2>" +
+          (a.description ? '<div class="prose">' + para(a.description) + "</div>" : "") +
+          (ph.length ? '<div class="thumbs">' + ph.map(function (p, k) { return '<button type="button" data-k="' + k + '" aria-label="' + esc(p.caption || ("Photo " + (k + 1))) + '"><img src="' + esc(photoUrl(thumbOf(p.path))) + '" alt="" loading="lazy"></button>'; }).join("") + "</div>" : '<p class="muted">Photos coming soon.</p>');
+        if (!ph.length) return;
+        var open = lightbox(ph);
+        box.querySelectorAll(".thumbs button").forEach(function (b) { b.addEventListener("click", function () { open(+b.getAttribute("data-k"), b); }); });
+      }).catch(function () { box.innerHTML = "<p>This album could not be loaded right now. Please try again later.</p>"; });
+      return;
+    }
+    get("albums?select=id,title,category,event_date,description,cover_path&order=event_date.desc.nullslast&limit=200").then(function (rows) {
+      if (!rows.length) { box.innerHTML = '<p class="muted">Albums are coming soon. Check back for photos from our events and community activities.</p>'; return; }
+      var cats = []; rows.forEach(function (r) { if (cats.indexOf(r.category) < 0) cats.push(r.category); });
+      var cur = "All";
+      function draw() {
+        var list = rows.filter(function (r) { return cur === "All" || r.category === cur; });
+        box.innerHTML = '<div class="filters" role="group" aria-label="Filter albums">' + ["All"].concat(cats).map(function (c) { return '<button type="button" aria-pressed="' + (c === cur) + '" data-c="' + esc(c) + '">' + esc(c) + "</button>"; }).join("") + "</div>" +
+          '<div class="albums">' + list.map(function (a) {
+            return '<article class="card"><a class="cardlink" href="gallery.html?album=' + encodeURIComponent(a.id) + '">' +
+              (a.cover_path ? '<img src="' + esc(photoUrl(thumbOf(a.cover_path))) + '" alt="" loading="lazy">' : '<div class="nophoto">Photos coming soon</div>') +
+              '<div class="body"><p class="meta up">' + esc(a.category) + (a.event_date ? " &middot; " + esc(fmtDate(a.event_date + "T12:00:00Z")) : "") + "</p><h3>" + esc(a.title) + "</h3></div></a></article>";
+          }).join("") + "</div>";
+        box.querySelectorAll(".filters button").forEach(function (b) { b.addEventListener("click", function () { cur = b.getAttribute("data-c"); draw(); box.querySelector('.filters button[aria-pressed="true"]').focus(); }); });
+      }
+      draw();
+    }).catch(function () { box.innerHTML = "<p>The gallery could not be loaded right now. Please try again later.</p>"; });
+  }
+
   get("apparatus?select=*&is_active=eq.true&order=sort_order.asc").then(apparatus).catch(function () {});
   get("site_content?select=key,value").then(content).catch(function () {});
   if (document.querySelector("[data-events-upcoming],[data-home-events]")) get("events?select=*&status=eq.published&order=starts_at.asc&limit=300").then(events).catch(function () {});
   if (document.querySelector("[data-news],[data-home-news]")) get("news?select=id,title,category,summary,cover_path,published_at&status=eq.published&order=published_at.desc&limit=60").then(news).catch(function () {});
   article();
+  gallery();
+  if (document.querySelector("[data-collage]")) get("homepage_photos?select=path&is_featured=eq.true&order=sort_order.asc&limit=5").then(collage).catch(function () {});
 })();
