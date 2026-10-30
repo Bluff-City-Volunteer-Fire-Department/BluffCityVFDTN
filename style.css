@@ -121,3 +121,10 @@ details.archive summary{cursor:pointer;font-family:var(--head);text-transform:up
 @media (max-width:1280px) and (min-width:961px){nav a{font-size:1rem;padding:1.35rem .45rem}}
 nav ul{flex-wrap:wrap;justify-content:flex-end}
 @media (max-width:960px){nav ul{justify-content:flex-start}}
+
+p:empty{display:none}
+.meta-grid{display:grid;gap:.6rem 2rem;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:1.2rem 0}
+.meta-grid div span{display:block;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ctl{display:flex;flex-wrap:wrap;gap:1rem;margin:1rem 0 2rem}
+.ctl label span{display:block;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.ctl select{background:#0D0D0D;color:#fff;border:1px solid var(--line);padding:.55rem .7rem;font:inherit;min-width:200px}

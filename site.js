@@ -54,6 +54,10 @@
     if (r.text) document.querySelectorAll('[data-content="recruitment.text"]').forEach(function (el) { el.textContent = r.text; });
     if (r.how_to_start) document.querySelectorAll('[data-content="recruitment.how_to_start"]').forEach(function (el) { el.textContent = r.how_to_start; });
     featured(c.featured);
+    var ab = c.about || {};
+    document.querySelectorAll("[data-para]").forEach(function (el) { var v = (ab[el.getAttribute("data-para").split(".")[1]] || ""); if (v) el.innerHTML = para(v); });
+    if (r.what_to_expect) document.querySelectorAll('[data-content="recruitment.what_to_expect"]').forEach(function (el) { el.textContent = r.what_to_expect; });
+    if (r.who_can_apply) document.querySelectorAll('[data-content="recruitment.who_can_apply"]').forEach(function (el) { el.textContent = r.who_can_apply; });
     var h = c.home_hero || {};
     function hero(name, fn) { var el = document.querySelector('[data-hero="' + name + '"]'); if (el) fn(el); }
     if (h.eyebrow) hero("eyebrow", function (el) { el.textContent = h.eyebrow; });
@@ -137,7 +141,7 @@
   /* ----- gallery ----- */
   function lightbox(items) {
     var lb = document.querySelector(".lb"), img = lb.querySelector("img"), cap = lb.querySelector("figcaption"), i = 0, opener = null, x0 = null;
-    function show(k) { i = (k + items.length) % items.length; img.src = photoUrl(items[i].path); img.alt = items[i].caption || ""; cap.textContent = items[i].caption || ""; }
+    function show(k) { i = (k + items.length) % items.length; img.src = items[i].url || photoUrl(items[i].path); img.alt = items[i].caption || ""; cap.textContent = items[i].caption || ""; }
     function open(k, el) { opener = el; show(k); lb.hidden = false; document.body.style.overflow = "hidden"; lb.querySelector(".lb-x").focus(); }
     function close() { lb.hidden = true; document.body.style.overflow = ""; if (opener) opener.focus(); }
     lb.querySelector(".lb-x").onclick = close; lb.querySelector(".lb-p").onclick = function () { show(i - 1); }; lb.querySelector(".lb-n").onclick = function () { show(i + 1); };
@@ -182,11 +186,73 @@
     }).catch(function () { box.innerHTML = "<p>The gallery could not be loaded right now. Please try again later.</p>"; });
   }
 
+  function signPaths(paths) {
+    if (!paths.length) return Promise.resolve({});
+    return fetch(C.url + "/storage/v1/object/sign/incident-media", { method: "POST", headers: { apikey: C.key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600, paths: paths }) })
+      .then(function (r) { return r.json(); }).then(function (arr) { var m = {}; (arr || []).forEach(function (x) { if (x.signedURL) m[x.path] = C.url + "/storage/v1" + x.signedURL; }); return m; });
+  }
+  function calls() {
+    var box = document.getElementById("calls"); if (!box) return;
+    var id = new URLSearchParams(location.search).get("id");
+    if (id) {
+      if (!/^[0-9a-f-]{36}$/i.test(id)) { box.innerHTML = "<p>That response could not be found.</p>"; return; }
+      Promise.all([get("incidents?select=*&id=eq." + id), get("incident_photos?select=*&incident_id=eq." + id + "&order=sort_order.asc")]).then(function (r) {
+        var a = r[0][0], ph = r[1]; if (!a) { box.innerHTML = "<p>That response could not be found.</p>"; return; }
+        var paths = []; ph.forEach(function (p) { paths.push(p.path, thumbOf(p.path)); });
+        return signPaths(paths).then(function (m) {
+          document.title = a.category + " | Bluff City Volunteer Fire Department";
+          var apps = (a.responding_apparatus || []).join(", ");
+          box.innerHTML = '<p><a href="calls.html">&larr; All recent calls</a></p><div class="eyebrow">' + esc(fmtDate(a.incident_date + "T12:00:00Z")) + "</div><h2>" + esc(a.category) + (a.general_location ? " &mdash; " + esc(a.general_location) : "") + "</h2>" +
+            '<div class="meta-grid"><div><span>Type</span>' + esc(a.category) + "</div>" + (a.general_location ? "<div><span>General location</span>" + esc(a.general_location) + "</div>" : "") +
+            (apps ? "<div><span>Responding apparatus</span>" + esc(apps) + "</div>" : "") + (a.assisting_agencies ? "<div><span>Assisting agencies</span>" + esc(a.assisting_agencies) + "</div>" : "") + "</div>" +
+            (a.narrative ? '<div class="prose">' + para(a.narrative) + "</div>" : "") +
+            (ph.length ? '<div class="thumbs">' + ph.map(function (p, k) { return '<button type="button" data-k="' + k + '" aria-label="' + esc(p.caption || ("Photo " + (k + 1))) + '"><img src="' + esc(m[thumbOf(p.path)] || "") + '" alt="" loading="lazy"></button>'; }).join("") + "</div>" : "");
+          if (!ph.length) return;
+          var items = ph.map(function (p) { return { url: m[p.path], caption: p.caption }; }), open = lightbox(items);
+          box.querySelectorAll(".thumbs button").forEach(function (b) { b.addEventListener("click", function () { open(+b.getAttribute("data-k"), b); }); });
+        });
+      }).catch(function () { box.innerHTML = "<p>This response could not be loaded right now. Please try again later.</p>"; });
+      return;
+    }
+    get("incidents?select=id,incident_date,category,general_location,responding_apparatus,narrative&order=incident_date.desc&limit=300").then(function (rows) {
+      if (!rows.length) { box.innerHTML = '<p class="muted">No recent calls have been posted yet. Check back soon.</p>'; return; }
+      var cats = [], years = [];
+      rows.forEach(function (r) { var y = r.incident_date.slice(0, 4); if (cats.indexOf(r.category) < 0) cats.push(r.category); if (years.indexOf(y) < 0) years.push(y); });
+      function sel(label, id, vals) { return '<label><span>' + label + '</span><select id="' + id + '"><option value="">All</option>' + vals.map(function (v) { return '<option>' + esc(v) + "</option>"; }).join("") + "</select></label>"; }
+      box.innerHTML = '<div class="ctl">' + sel("Category", "fc", cats) + sel("Year", "fy", years) + '</div><div class="albums" id="clist"></div>';
+      function draw() {
+        var c = document.getElementById("fc").value, y = document.getElementById("fy").value;
+        var list = rows.filter(function (r) { return (!c || r.category === c) && (!y || r.incident_date.slice(0, 4) === y); });
+        document.getElementById("clist").innerHTML = list.length ? list.map(function (r) {
+          var n = (r.narrative || ""); if (n.length > 160) n = n.slice(0, 160).replace(/\s+\S*$/, "") + "\u2026";
+          return '<article class="card"><a class="cardlink" href="calls.html?id=' + encodeURIComponent(r.id) + '"><div class="body"><p class="meta up">' + esc(fmtDate(r.incident_date + "T12:00:00Z")) + "</p><h3>" + esc(r.category) + "</h3>" +
+            (r.general_location ? '<p class="type">' + esc(r.general_location) + "</p>" : "") + (r.responding_apparatus && r.responding_apparatus.length ? '<p class="meta">' + esc(r.responding_apparatus.join(", ")) + "</p>" : "") +
+            (n ? '<p class="meta">' + esc(n) + "</p>" : "") + "</div></a></article>";
+        }).join("") : '<p class="muted">No calls match those filters.</p>';
+      }
+      document.getElementById("fc").addEventListener("change", draw); document.getElementById("fy").addEventListener("change", draw); draw();
+    }).catch(function () { box.innerHTML = "<p>Recent calls could not be loaded right now. Please try again later.</p>"; });
+  }
+  function siteSettings(rows) {
+    var s = {}; rows.forEach(function (r) { s[r.key] = r.value; });
+    var items = s.navigation, ul = document.querySelector("header.site nav ul");
+    if (Array.isArray(items) && items.length && ul) {
+      var here = location.pathname.split("/").pop() || "index.html";
+      ul.innerHTML = items.filter(function (it) { return it && typeof it.label === "string" && /^[a-z]+\.html$/.test(it.href || ""); }).map(function (it) {
+        return '<li><a href="' + esc(it.href) + '"' + (it.href === here ? ' aria-current="page"' : "") + ">" + esc(it.label) + "</a></li>"; }).join("");
+    }
+    var logo = s.branding && s.branding.logo_path, im = document.querySelector(".brand img");
+    if (logo && im) { im.src = photoUrl(logo); im.style.display = ""; }
+    if (s.footer && s.footer.blurb) document.querySelectorAll('[data-footer="blurb"]').forEach(function (el) { el.textContent = s.footer.blurb; });
+  }
+
   get("apparatus?select=*&is_active=eq.true&order=sort_order.asc").then(apparatus).catch(function () {});
   get("site_content?select=key,value").then(content).catch(function () {});
   if (document.querySelector("[data-events-upcoming],[data-home-events]")) get("events?select=*&status=eq.published&order=starts_at.asc&limit=300").then(events).catch(function () {});
   if (document.querySelector("[data-news],[data-home-news]")) get("news?select=id,title,category,summary,cover_path,published_at&status=eq.published&order=published_at.desc&limit=60").then(news).catch(function () {});
   article();
+  calls();
+  get("site_settings?select=key,value").then(siteSettings).catch(function () {});
   gallery();
   if (document.querySelector("[data-collage]")) get("homepage_photos?select=path&is_featured=eq.true&order=sort_order.asc&limit=5").then(collage).catch(function () {});
 })();
