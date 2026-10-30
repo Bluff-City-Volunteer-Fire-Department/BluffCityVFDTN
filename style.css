@@ -33,3 +33,4 @@ section{padding:3rem 0}section.alt{background:var(--steel)}section h2{font-size:
 .box911 b{font-family:Rockwell,Georgia,serif;font-size:2.4rem;display:block;line-height:1}
 footer{background:var(--navy);color:#c3ccd6;padding:2rem 0;font-size:.95rem}footer a{color:#e8c777}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+.pic{display:block;width:100%;height:auto;border-radius:4px}
