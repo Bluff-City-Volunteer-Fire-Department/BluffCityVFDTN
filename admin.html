@@ -163,10 +163,10 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
   /* ---------- app shell ---------- */
   var PERMS = {
     none: [], contributor: ["dashboard", "news", "gallery", "incidents", "account"],
-    editor: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "people", "homepage", "contact", "account"],
-    admin: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "people", "settings", "homepage", "contact", "users", "log", "account"]
+    editor: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "homepage", "contact", "account"],
+    admin: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "settings", "homepage", "contact", "users", "log", "account"]
   };
-  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", gallery: "Gallery", collage: "Homepage collage", incidents: "Recent Calls", department: "Department info", people: "People", settings: "Website settings", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
+  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", gallery: "Gallery", collage: "Homepage collage", incidents: "Recent Calls", department: "Department info", settings: "Website settings", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
 
   function enter(user) {
     sb.from("profiles").select("role,email").eq("id", user.id).maybeSingle().then(function (r) {
@@ -192,7 +192,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
         h("div", { class: "row" }, h("small", {}, me.email), h("a", { class: "btn ghost small", href: "index.html", target: "_blank", rel: "noopener" }, "View site"),
           h("button", { class: "btn ghost small", onclick: signOut }, "Sign out")))),
       h("div", { class: "lay" }, nav, main));
-    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, gallery: vGallery, collage: vCollage, incidents: vIncidents, department: vDepartment, people: vPeople, settings: vSettings, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
+    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, gallery: vGallery, collage: vCollage, incidents: vIncidents, department: vDepartment, settings: vSettings, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
     Promise.resolve().then(fn).then(function (node) { main.replaceChildren(node); }).catch(function (e) { main.replaceChildren(h("p", { class: "err" }, "Could not load this page: " + (e.message || e))); });
   }
   function signOut() { sb.auth.signOut().then(function () { me = null; showLogin(); }); }
@@ -718,18 +718,22 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
 
   /* ---------- department info ---------- */
   function vDepartment() {
-    return getContent(["about", "recruitment"]).then(function (c) {
-      var a = c.about || {}, r = c.recruitment || {};
+    return Promise.all([getContent(["about", "recruitment"]), peopleManager().catch(function (e) { return h("p", { class: "err" }, e.message); })]).then(function (x) {
+      var c = x[0], roster = x[1], a = c.about || {}, r = c.recruitment || {};
       var f1 = h("div", {}, h("h2", {}, "About page"),
         field("Department history and coverage area (blank line between paragraphs)", "history", a.history, "textarea", 10),
         field("Our volunteers (public membership information)", "membership_info", a.membership_info, "textarea", 5));
-      var f2 = h("div", {}, h("h2", { style: "margin-top:2rem" }, "Join Us page"),
-        field("What to expect", "what_to_expect", r.what_to_expect, "textarea", 3), field("Who can apply", "who_can_apply", r.who_can_apply, "textarea", 3),
+      var f2 = h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Join Us page"),
+        field("What to expect", "what_to_expect", r.what_to_expect, "textarea", 4), field("Who can apply", "who_can_apply", r.who_can_apply, "textarea", 4),
         h("p", { class: "muted" }, "Tip: start each line with a dash and a space (- ) to make a bulleted list. Leave a blank line between paragraphs. The introduction and \"How to start\" text are under Homepage text."));
-      return h("div", {}, h("h1", {}, "Department info"), f1, f2, h("button", { class: "btn primary", onclick: function () {
-        Promise.all([saveContent("site_content", "about", Object.assign({}, a, vals(f1))), saveContent("site_content", "recruitment", Object.assign({}, r, vals(f2)))])
-          .then(function () { toast("Saved. The public site updates right away.", true); }).catch(fail);
-      } }, "Save changes"));
+      return h("div", {}, h("h1", {}, "Department info"), f1,
+        h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
+          saveContent("site_content", "about", Object.assign({}, a, vals(f1))).then(function () { toast("About text saved. The public site updates right away.", true); }).catch(fail);
+        } }, "Save about text")),
+        roster, f2,
+        h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
+          saveContent("site_content", "recruitment", Object.assign({}, r, vals(f2))).then(function () { toast("Join Us text saved.", true); }).catch(fail);
+        } }, "Save Join Us text")));
     });
   }
 
@@ -785,11 +789,11 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
 
 
   /* ---------- people (roster on the About page) ---------- */
-  function vPeople() {
+  function peopleManager() {
     return sb.from("members").select("*").order("sort_order", { ascending: true }).then(function (r) {
       if (r.error) throw new Error("The People list is not set up yet. Run the supabase-people.sql file in Supabase first. (" + r.error.message + ")");
-      var rows = r.data, box = h("div", {}, h("h1", {}, "People"),
-        h("p", { class: "muted prose" }, "These members appear in the Our People section of the About page, in this order. Only add members who have agreed to be shown, with their photo, and do not list anyone under 18."),
+      var rows = r.data, box = h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Volunteer roster"),
+        h("p", { class: "muted prose" }, "These members appear under Our volunteers on the About page, in this order. Only add members who have agreed to be shown, with their photo, and do not list anyone under 18."),
         h("div", { class: "row", style: "margin-bottom:1.5rem" }, h("button", { class: "btn primary", onclick: function () {
           var n = prompt("Member's full name"); if (!n || !n.trim()) return;
           sb.from("members").insert({ full_name: n.trim(), sort_order: nextOrder(rows) }).then(function (x) { if (x.error) return fail(x.error); toast("Added. Now add a title, start year, and photo.", true); shell(); });
