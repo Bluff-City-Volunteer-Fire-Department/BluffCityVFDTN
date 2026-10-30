@@ -15,6 +15,78 @@
     if (im.complete && im.naturalWidth === 0) next();
   })();
 
+  /* ----- homepage announcement pop-up ----- */
+  var ANN_CLASS = { "Community Events": "community", "Fundraisers": "fundraiser", "Recruitment": "recruit", "Public Safety Notices": "safety", "Department Announcements": "dept", "Special Events": "special" };
+  function safeUrl(u) { return /^(https?:\/\/[^\s]+|[a-z0-9_.\/#?=&%-]+)$/i.test(u || "") ? u : ""; }
+  function announcement() {
+    if (!document.querySelector(".hero")) return;                      // homepage only
+    get("announcements?select=*&limit=1").then(function (rows) {
+      var a = rows[0]; if (!a) return;
+      var key = "bcvfd-ann:" + a.id + ":" + a.revision;                 // new announcement OR new revision = shows again
+      try { if (localStorage.getItem(key)) return; } catch (e) {}
+      var url = safeUrl(a.button_url), external = /^https?:/i.test(url);
+      var wrap = document.createElement("div"); wrap.className = "ann-overlay";
+      wrap.innerHTML = '<div class="ann ann-' + (ANN_CLASS[a.category] || "dept") + (a.importance === "important" ? " ann-important" : "") + '" role="dialog" aria-modal="true" aria-labelledby="ann-t"' + (a.body ? ' aria-describedby="ann-d"' : "") + ' tabindex="-1">' +
+        '<button type="button" class="ann-x" aria-label="Close announcement">&times;</button>' +
+        (a.image_path ? '<img class="ann-img" src="' + esc(photoUrl(a.image_path)) + '" alt="">' : "") +
+        '<div class="ann-body"><p class="ann-tag"><span>' + esc(a.category) + "</span>" + (a.importance === "important" ? '<span class="ann-flag">Important</span>' : "") + '</p><h2 id="ann-t">' + esc(a.title) + "</h2>" +
+        (a.body ? '<div id="ann-d">' + para(a.body) + "</div>" : "") +
+        '<div class="ann-actions">' + (a.button_label && url ? '<a class="btn primary" href="' + esc(url) + '"' + (external ? ' target="_blank" rel="noopener"' : "") + ">" + esc(a.button_label) + "</a>" : "") +
+        '<button type="button" class="btn ghost ann-close">Close</button></div></div></div>';
+      var opener = document.activeElement, dlg = wrap.firstChild;
+      function close() {
+        try { localStorage.setItem(key, "1"); } catch (e) {}
+        document.removeEventListener("keydown", onKey, true); wrap.remove(); document.body.style.overflow = "";
+        if (opener && opener.focus) opener.focus();
+      }
+      function onKey(e) {
+        if (e.key === "Escape") { e.preventDefault(); close(); return; }
+        if (e.key !== "Tab") return;
+        var f = dlg.querySelectorAll("a[href],button:not([disabled])"); if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === dlg)) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+      wrap.addEventListener("click", function (e) { if (e.target === wrap) close(); });
+      dlg.querySelector(".ann-x").addEventListener("click", close); dlg.querySelector(".ann-close").addEventListener("click", close);
+      var link = dlg.querySelector(".ann-actions a"); if (link) link.addEventListener("click", function () { try { localStorage.setItem(key, "1"); } catch (e) {} });
+      document.body.appendChild(wrap); document.body.style.overflow = "hidden"; document.addEventListener("keydown", onKey, true);
+      dlg.querySelector(".ann-x").focus();
+    }).catch(function () {});
+  }
+  function storeApplication(f) {
+    var fd = new FormData(f), n = function (k) { var v = fd.get(k); return v ? String(v).trim() : null; };
+    var row = { full_name: n("name"), phone: n("Phone"), email: n("email"), age: n("Age") ? parseInt(n("Age"), 10) : null, address: n("Address"), experience: n("Experience"),
+      motivation: n("Why you want to join"), availability: n("Availability"), agreed_to_contact: !!fd.get("Agreed to be contacted") };
+    return fetch(C.url + "/rest/v1/applications", { method: "POST", headers: { apikey: C.key, "Content-Type": "application/json", Prefer: "return=minimal" }, body: JSON.stringify(row) })
+      .then(function (r) { if (!r.ok) throw new Error("store " + r.status); });
+  }
+  var S2 = { s: {}, c: {} };
+  function moreSettings() {
+    var s = S2.s, c = S2.c, here = location.pathname.split("/").pop() || "index.html", detail = /[?&](id|album)=/.test(location.search);
+    var seo = s.seo && s.seo[here];
+    if (seo && !detail) {
+      if (seo.title) document.title = seo.title;
+      if (seo.description) { var m = document.querySelector('meta[name="description"]'); if (!m) { m = document.createElement("meta"); m.name = "description"; document.head.appendChild(m); } m.content = seo.description; }
+    }
+    var soc = s.social || {}, links = [["facebook", "Facebook"], ["instagram", "Instagram"], ["youtube", "YouTube"], ["x", "X"], ["tiktok", "TikTok"]].filter(function (p) { return /^https:\/\//i.test(soc[p[0]] || ""); });
+    var col = document.querySelector("footer .grid > div");
+    if (col && links.length && !col.querySelector(".social")) {
+      var sp = document.createElement("p"); sp.className = "social";
+      sp.innerHTML = links.map(function (p2) { return '<a href="' + esc(soc[p2[0]]) + '" target="_blank" rel="noopener">' + p2[1] + "</a>"; }).join(" &middot; "); col.appendChild(sp);
+    }
+    var d = c.donation;
+    if (d) {
+      document.querySelectorAll('[data-rich="donation.intro"]').forEach(function (el) { if (d.intro) el.innerHTML = rich(d.intro); });
+      document.querySelectorAll("[data-donation-ways]").forEach(function (ul) {
+        if (d.ways) ul.innerHTML = String(d.ways).split("\n").map(function (l) { return l.trim().replace(/^[-\u2022*]\s*/, ""); }).filter(Boolean).map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("");
+        var box = ul.parentNode;
+        if (/^https:\/\//i.test(d.online_url || "") && !box.querySelector(".donate-online")) { var q = document.createElement("p"); q.className = "donate-online"; q.innerHTML = '<a class="btn primary" href="' + esc(d.online_url) + '" target="_blank" rel="noopener">' + esc(d.online_label || "Donate online") + "</a>"; box.appendChild(q); }
+        if (d.tax_id && !box.querySelector(".taxid")) { var t = document.createElement("p"); t.className = "taxid muted"; t.textContent = "Tax ID (EIN): " + d.tax_id; box.appendChild(t); }
+      });
+    }
+  }
+
   function get(path) {
     return fetch(C.url + "/rest/v1/" + path, { headers: { apikey: C.key } })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
@@ -67,6 +139,7 @@
     if (r.text) document.querySelectorAll('[data-content="recruitment.text"]').forEach(function (el) { el.textContent = r.text; });
     if (r.how_to_start) document.querySelectorAll('[data-content="recruitment.how_to_start"]').forEach(function (el) { el.textContent = r.how_to_start; });
     featured(c.featured);
+    S2.c = c; moreSettings();
     var ab = c.about || {};
     document.querySelectorAll("[data-para]").forEach(function (el) { var v = (ab[el.getAttribute("data-para").split(".")[1]] || ""); if (v) el.innerHTML = para(v); });
     if (r.what_to_expect) document.querySelectorAll('[data-rich="recruitment.what_to_expect"]').forEach(function (el) { el.innerHTML = rich(r.what_to_expect); });
@@ -268,6 +341,7 @@
   }
   function siteSettings(rows) {
     var s = {}; rows.forEach(function (r) { s[r.key] = r.value; });
+    S2.s = s; moreSettings();
     var items = s.navigation, ul = document.querySelector("header.site nav ul");
     if (Array.isArray(items) && items.length && ul) {
       var here = location.pathname.split("/").pop() || "index.html";
@@ -285,17 +359,22 @@
       var fallback = "Sorry, that did not send. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM.";
       f.addEventListener("submit", function (e) {
         e.preventDefault();
-        var key = f.closest("#message") ? (C.web3formsContactKey || C.web3formsKey) : C.web3formsKey;
-        if (!key) { status.textContent = "This form is not connected yet. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM."; return; }
         var fd = new FormData(f); if (fd.get("botcheck")) return;
-        var data = {}; fd.forEach(function (v, k) { if (k !== "botcheck") data[k] = v; });
-        data.access_key = key; data.subject = f.getAttribute("data-subject"); data.from_name = "Bluff City VFD website";
+        var isApp = !!f.closest("#apply"), key = f.closest("#message") ? (C.web3formsContactKey || C.web3formsKey) : C.web3formsKey, tasks = [];
+        if (isApp) tasks.push(storeApplication(f));
+        if (key) {
+          var data = {}; fd.forEach(function (v, k) { if (k !== "botcheck") data[k] = v; });
+          data.access_key = key; data.subject = f.getAttribute("data-subject"); data.from_name = "Bluff City VFD website";
+          tasks.push(fetch("https://api.web3forms.com/submit", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(data) })
+            .then(function (r) { return r.json(); }).then(function (j) { if (!j.success) throw new Error(j.message || "failed"); }));
+        }
+        if (!tasks.length) { status.textContent = "This form is not connected yet. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM."; return; }
         btn.disabled = true; status.textContent = "Sending\u2026";
-        fetch("https://api.web3forms.com/submit", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(data) })
-          .then(function (r) { return r.json(); })
-          .then(function (j) { if (!j.success) throw new Error(j.message || "failed"); f.reset(); status.textContent = f.getAttribute("data-thanks"); })
-          .catch(function () { status.textContent = fallback; })
-          .then(function () { btn.disabled = false; });
+        Promise.allSettled(tasks).then(function (res) {
+          var ok = res.some(function (r) { return r.status === "fulfilled"; });
+          if (ok) { f.reset(); status.textContent = f.getAttribute("data-thanks"); } else status.textContent = fallback;
+          btn.disabled = false;
+        });
       });
     });
   }
@@ -305,6 +384,7 @@
   if (document.querySelector("[data-events-upcoming],[data-home-events]")) get("events?select=*&status=eq.published&order=starts_at.asc&limit=300").then(events).catch(function () {});
   if (document.querySelector("[data-news],[data-home-news]")) get("news?select=id,title,category,summary,cover_path,published_at&status=eq.published&order=published_at.desc&limit=60").then(news).catch(function () {});
   article();
+  announcement();
   if (document.querySelector("[data-people]")) get("members?select=*&is_active=eq.true&order=sort_order.asc").then(people).catch(function () {});
   forms();
   calls();

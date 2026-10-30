@@ -178,3 +178,23 @@ button.btn{cursor:pointer}
 .person .body{padding:1rem 1.1rem 1.2rem}.person h3{font-size:1.4rem;margin:0 0 .15rem}
 .person .role{color:#fff;font-weight:600;margin:0}.person .svc{color:var(--muted);font-size:.9rem;margin:.3rem 0 0}
 @media (prefers-reduced-motion:reduce){.person:hover{transform:none}}
+
+/* homepage announcement pop-up */
+.ann-overlay{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:300;display:flex;align-items:center;justify-content:center;padding:1rem;animation:annfade .2s ease-out}
+@keyframes annfade{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.ann-overlay{animation:none}}
+.ann{--accent:#C71928;position:relative;background:#1C1C1C;border:1px solid #333;border-top:6px solid var(--accent);width:min(560px,100%);max-height:92vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.ann:focus{outline:none}
+.ann-community{--accent:#C71928}.ann-fundraiser{--accent:#FFFFFF}.ann-recruit{--accent:#E04552}.ann-safety{--accent:#B8B8B8}.ann-dept{--accent:#8c1920}.ann-special{--accent:#FF8A93}
+.ann-img{display:block;width:100%;max-height:260px;object-fit:cover;border-bottom:1px solid #333}
+.ann-body{padding:1.5rem 1.6rem 1.7rem}
+.ann-tag{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin:0 0 .6rem;font-family:var(--head);text-transform:uppercase;letter-spacing:.12em;color:#B8B8B8;font-size:1rem}
+.ann-flag{background:var(--red);color:#fff;padding:.05rem .6rem;letter-spacing:.1em}
+.ann h2{font-size:clamp(2rem,6vw,2.8rem);margin-bottom:.6em}.ann h2::before{background:var(--accent)}
+.ann-body p{font-size:1.05rem}
+.ann-actions{display:flex;flex-wrap:wrap;gap:.7rem;margin-top:1.4rem}
+.ann-x{position:absolute;top:.6rem;right:.6rem;z-index:2;width:44px;height:44px;background:rgba(13,13,13,.85);color:#fff;border:1px solid #555;font-size:1.8rem;line-height:1;cursor:pointer}
+.ann-x:hover{background:var(--red)}
+.ann-important{border-color:var(--red)}
+footer .social a{color:#fff}
+button.btn{background:transparent;color:#fff;font-family:var(--head)}

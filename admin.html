@@ -162,11 +162,13 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
 
   /* ---------- app shell ---------- */
   var PERMS = {
-    none: [], contributor: ["dashboard", "news", "gallery", "incidents", "account"],
-    editor: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "homepage", "contact", "account"],
-    admin: ["dashboard", "news", "events", "gallery", "collage", "incidents", "apparatus", "department", "settings", "homepage", "contact", "users", "log", "account"]
+    none: [], contributor: ["dashboard", "newsevents", "gallery", "incidents", "account"],
+    editor: ["dashboard", "homepage", "announcements", "apparatus", "newsevents", "gallery", "incidents", "department", "contact", "history", "account"],
+    admin: ["dashboard", "homepage", "announcements", "apparatus", "newsevents", "gallery", "incidents", "applications", "department", "contact", "settings", "history", "users", "log", "account"]
   };
-  var LABEL = { dashboard: "Dashboard", news: "News", events: "Events", gallery: "Gallery", collage: "Homepage collage", incidents: "Recent Calls", department: "Department info", settings: "Website settings", apparatus: "Apparatus", homepage: "Homepage text", contact: "Contact & meetings", users: "Users & roles", log: "Activity log", account: "My account" };
+  var LABEL = { dashboard: "Overview", homepage: "Homepage Manager", announcements: "Announcement Manager", apparatus: "Apparatus", newsevents: "News & Events", gallery: "Community Gallery",
+    incidents: "Recent Calls", applications: "Firefighter Applications", department: "Department Info", contact: "Contact & Meetings", settings: "Website Settings",
+    history: "Version History", users: "User Management", log: "Audit Log", account: "My Account" };
 
   function enter(user) {
     sb.from("profiles").select("role,email").eq("id", user.id).maybeSingle().then(function (r) {
@@ -192,7 +194,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
         h("div", { class: "row" }, h("small", {}, me.email), h("a", { class: "btn ghost small", href: "index.html", target: "_blank", rel: "noopener" }, "View site"),
           h("button", { class: "btn ghost small", onclick: signOut }, "Sign out")))),
       h("div", { class: "lay" }, nav, main));
-    var fn = { dashboard: vDashboard, news: vNews, events: vEvents, gallery: vGallery, collage: vCollage, incidents: vIncidents, department: vDepartment, settings: vSettings, apparatus: vApparatus, homepage: vHomepage, contact: vContact, users: vUsers, log: vLog, account: vAccount }[view];
+    var fn = { dashboard: vDashboard, homepage: vHomepageManager, announcements: vAnnouncements, apparatus: vApparatus, newsevents: vNewsEvents, gallery: vGallery, incidents: vIncidents, applications: vApplications, department: vDepartment, contact: vContact, settings: vSettingsTabs, history: vHistory, users: vUsers, log: vLog, account: vAccount }[view];
     Promise.resolve().then(fn).then(function (node) { main.replaceChildren(node); }).catch(function (e) { main.replaceChildren(h("p", { class: "err" }, "Could not load this page: " + (e.message || e))); });
   }
   function signOut() { sb.auth.signOut().then(function () { me = null; showLogin(); }); }
@@ -203,24 +205,37 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
     return (build ? build(q) : q).then(function (r) { return r.error ? "-" : r.count; });
   }
   function vDashboard() {
-    var jobs = [
-      count("apparatus", function (q) { return q.eq("is_active", true); }),
+    var isAdmin = me.role === "admin", isEditor = me.role !== "contributor", nowIso = new Date().toISOString();
+    function recent(table, col, kind) {
+      return sb.from(table).select("id," + col + ",updated_at").order("updated_at", { ascending: false }).limit(4).then(function (r) {
+        return (r.data || []).map(function (x) { return { kind: kind, name: x[col], at: x.updated_at }; });
+      });
+    }
+    return Promise.all([
+      isAdmin ? count("applications", function (q) { return q.eq("status", "new"); }) : Promise.resolve(null),
       count("news", function (q) { return q.in("status", ["draft", "pending"]); }),
-      count("events", function (q) { return q.in("status", ["draft", "pending"]); }),
-      count("incidents", function (q) { return q.in("status", ["draft", "pending"]); }),
-      count("events", function (q) { return q.eq("status", "published").gte("starts_at", new Date().toISOString()); })
-    ];
-    var log = me.role === "admin" ? sb.from("audit_log").select("at,user_email,action,table_name").order("at", { ascending: false }).limit(8) : Promise.resolve({ data: [] });
-    return Promise.all(jobs.concat([log])).then(function (a) {
-      function stat(n, l) { return h("div", { class: "stat" }, h("b", {}, n), l); }
+      count("incidents", function (q) { return q.eq("status", "pending"); }),
+      count("events", function (q) { return q.eq("status", "published").gte("starts_at", nowIso); }),
+      isEditor ? sb.from("announcements").select("title,category,starts_at,ends_at,status").eq("is_active", true).limit(1) : Promise.resolve({ data: [] }),
+      Promise.all([recent("news", "title", "News"), recent("events", "name", "Event"), recent("albums", "title", "Album"), recent("apparatus", "unit_number", "Apparatus"),
+        isEditor ? recent("announcements", "title", "Announcement") : Promise.resolve([]), recent("incidents", "category", "Recent call")]),
+      isAdmin ? sb.from("audit_log").select("at,user_email,action,table_name").order("at", { ascending: false }).limit(8) : Promise.resolve({ data: [] })
+    ]).then(function (a) {
       var can = PERMS[me.role];
-      function go(v, label) { return can.indexOf(v) > -1 ? h("button", { class: "btn primary", onclick: function () { view = v; shell(); } }, label) : null; }
-      return h("div", {}, h("h1", {}, "Dashboard"),
-        h("div", { class: "stats" }, stat(a[0], "Apparatus on the site"), stat(a[1], "News drafts waiting"), stat(a[2], "Event drafts waiting"), stat(a[3], "Incident drafts waiting"), stat(a[4], "Upcoming events")),
-        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("news", "Write news"), go("gallery", "Add photos"), go("incidents", "Draft a recent call"), go("events", "Add an event"), go("apparatus", "Edit apparatus"), go("homepage", "Edit homepage text"), go("contact", "Update contact info"), go("account", "Change my password")),
-        h("h2", { style: "margin-top:2.5rem" }, "Coming next"),
-        h("p", { class: "muted" }, "Everything in the plan is now built. Tell your web helper what you would like next."),
-        me.role === "admin" ? h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Recent activity"), logTable(a[5].data || [])) : null);
+      function stat(n, l) { return h("div", { class: "stat" }, h("b", {}, n == null ? "\u2013" : n), l); }
+      function go(v, label, tab) { return can.indexOf(v) > -1 ? h("button", { class: "btn primary", onclick: function () { view = v; edit = null; if (tab) tabState[v] = tab; shell(); } }, label) : null; }
+      var live = (a[4].data || [])[0], liveText = "None";
+      if (live) liveText = (live.ends_at && new Date(live.ends_at) <= Date.now()) ? "Expired: " + live.title : (live.starts_at && new Date(live.starts_at) > Date.now()) ? "Scheduled: " + live.title : "Live: " + live.title;
+      var items = [].concat.apply([], a[5]).sort(function (x, y) { return new Date(y.at) - new Date(x.at); }).slice(0, 8);
+      var rec = items.length ? h("table", { class: "t" }, h("tr", {}, h("th", {}, "Updated"), h("th", {}, "Type"), h("th", {}, "Item")),
+        items.map(function (x) { return h("tr", {}, h("td", {}, fmt(x.at)), h("td", {}, x.kind), h("td", {}, x.name)); })) : h("p", { class: "muted" }, "Nothing has been added yet.");
+      return h("div", {}, h("h1", {}, "Overview"),
+        h("div", { class: "stats" }, isAdmin ? stat(a[0], "New firefighter applications") : null, stat(a[1], "Draft articles"), stat(a[2], "Recent calls awaiting approval"), stat(a[3], "Upcoming events"),
+          isEditor ? h("div", { class: "stat" }, h("b", { style: "font-size:1.4rem" }, liveText), "Homepage announcement") : null),
+        h("h2", {}, "Quick actions"), h("div", { class: "row" }, go("newsevents", "Write news", "news"), go("newsevents", "Add an event", "events"), go("announcements", "New announcement"), go("gallery", "Add photos"),
+          go("incidents", "Draft a recent call"), go("applications", "Review applications"), go("homepage", "Edit homepage"), go("apparatus", "Edit apparatus")),
+        h("h2", { style: "margin-top:2.5rem" }, "Recently updated content"), rec,
+        isAdmin ? h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Recent administrative activity"), logTable(a[6].data || [])) : null);
     });
   }
 
@@ -717,24 +732,45 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
   }
 
   /* ---------- department info ---------- */
-  function vDepartment() {
-    return Promise.all([getContent(["about", "recruitment"]), peopleManager().catch(function (e) { return h("p", { class: "err" }, e.message); })]).then(function (x) {
-      var c = x[0], roster = x[1], a = c.about || {}, r = c.recruitment || {};
+  function vAboutTab() {
+    return Promise.all([getContent(["about"]), peopleManager().catch(function (e) { return h("p", { class: "err" }, e.message); })]).then(function (x) {
+      var a = x[0].about || {}, roster = x[1];
       var f1 = h("div", {}, h("h2", {}, "About page"),
-        field("Department history and coverage area (blank line between paragraphs)", "history", a.history, "textarea", 10),
+        field("Department history, coverage area, and services (blank line between paragraphs)", "history", a.history, "textarea", 10),
         field("Our volunteers (public membership information)", "membership_info", a.membership_info, "textarea", 5));
-      var f2 = h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Join Us page"),
-        field("What to expect", "what_to_expect", r.what_to_expect, "textarea", 4), field("Who can apply", "who_can_apply", r.who_can_apply, "textarea", 4),
-        h("p", { class: "muted" }, "Tip: start each line with a dash and a space (- ) to make a bulleted list. Leave a blank line between paragraphs. The introduction and \"How to start\" text are under Homepage text."));
-      return h("div", {}, h("h1", {}, "Department info"), f1,
-        h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
-          saveContent("site_content", "about", Object.assign({}, a, vals(f1))).then(function () { toast("About text saved. The public site updates right away.", true); }).catch(fail);
-        } }, "Save about text")),
-        roster, f2,
-        h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
-          saveContent("site_content", "recruitment", Object.assign({}, r, vals(f2))).then(function () { toast("Join Us text saved.", true); }).catch(fail);
-        } }, "Save Join Us text")));
+      return h("div", {}, f1, h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
+        saveContent("site_content", "about", Object.assign({}, a, vals(f1))).then(function () { toast("About text saved. The public site updates right away.", true); }).catch(fail);
+      } }, "Save about text")), roster);
     });
+  }
+  function vJoinTab() {
+    return getContent(["recruitment"]).then(function (c) {
+      var r = c.recruitment || {};
+      var f2 = h("div", {}, h("h2", {}, "Join Us page"),
+        field("What to expect", "what_to_expect", r.what_to_expect, "textarea", 4), field("Who can apply", "who_can_apply", r.who_can_apply, "textarea", 4),
+        h("p", { class: "muted" }, "Tip: start each line with a dash and a space (- ) to make a bulleted list. Leave a blank line between paragraphs. The introduction and \"How to start\" text are under Homepage Manager."));
+      return h("div", {}, f2, h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
+        saveContent("site_content", "recruitment", Object.assign({}, r, vals(f2))).then(function () { toast("Join Us text saved.", true); }).catch(fail);
+      } }, "Save Join Us text")));
+    });
+  }
+  function vDonationTab() {
+    return getContent(["donation"]).then(function (c) {
+      var d = Object.assign({
+        intro: "Bluff City Volunteer Fire Department is a 501(c)(3) nonprofit. Every gift helps pay for equipment and protective gear, training, and emergency response operations as we approach our 100th year.\n\nThank you to every neighbor, business, and partner who has stood behind us.",
+        ways: "- Mail a check payable to Bluff City Volunteer Fire Department, PO Box 366, Bluff City, TN 37618\n- Bring a gift to our Tuesday night meeting at 7 PM, 4256 Bluff City Highway\n- Call 423-538-5221 to arrange a gift\n- Buy from our fundraisers"
+      }, c.donation || {});
+      var f = h("div", {}, h("h2", {}, "Donation page"), field("Introduction (blank line between paragraphs)", "intro", d.intro, "textarea", 6),
+        field("Ways to give (one per line)", "ways", d.ways, "textarea", 5), field("Online donation link (optional, must start with https://)", "online_url", d.online_url),
+        field("Online donation button label", "online_label", d.online_label || "Donate online"), field("Tax ID / EIN (optional, shown publicly)", "tax_id", d.tax_id));
+      return h("div", {}, f, h("button", { class: "btn primary", onclick: function () {
+        var v = vals(f); if (v.online_url && !/^https:\/\//i.test(v.online_url)) return fail(new Error("The online donation link must start with https://"));
+        saveContent("site_content", "donation", Object.assign({}, d, v)).then(function () { toast("Donation information saved.", true); }).catch(fail);
+      } }, "Save donation information"));
+    });
+  }
+  function vDepartment() {
+    return tabbed("department", "Department Info", [{ key: "about", label: "About & volunteers", fn: vAboutTab }, { key: "join", label: "Join Us page", fn: vJoinTab }, { key: "donation", label: "Donation info", fn: vDonationTab }]);
   }
 
   /* ---------- website settings (administrators) ---------- */
@@ -823,6 +859,240 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
           } }, "Delete")))));
       });
       if (!rows.length) box.append(h("p", { class: "muted" }, "No members yet. Click Add a member to start."));
+      return box;
+    });
+  }
+
+
+  /* ---------- tabs ---------- */
+  var tabState = {};
+  function tabbed(name, title, tabs) {
+    tabs = tabs.filter(function (t) { return !t.roles || t.roles.indexOf(me.role) > -1; });
+    var cur = tabState[name]; if (!tabs.some(function (t) { return t.key === cur; })) cur = tabs[0].key;
+    var bar = h("div", { class: "row", style: "margin:1rem 0 1.5rem" }, tabs.map(function (t) {
+      return h("button", { class: "btn small " + (t.key === cur ? "primary" : "ghost"), onclick: function () { tabState[name] = t.key; edit = null; shell(); } }, t.label);
+    }));
+    var t = tabs.filter(function (x) { return x.key === cur; })[0];
+    return Promise.resolve(t.fn()).then(function (node) {
+      var first = node.querySelector && node.querySelector("h1"), hide = typeof t.hide === "function" ? t.hide() : t.hide !== false;
+      if (first && hide) first.remove();
+      return h("div", {}, h("h1", {}, title), bar, node);
+    });
+  }
+  function vHomepageManager() {
+    return tabbed("homepage", "Homepage Manager", [{ key: "text", label: "Text & featured card", fn: vHomepage }, { key: "collage", label: "Photo collage", fn: vCollage }]);
+  }
+  function vNewsEvents() {
+    return tabbed("newsevents", "News & Events", [
+      { key: "news", label: "News", fn: vNews, hide: function () { return !(edit && edit.kind === "news"); } },
+      { key: "events", label: "Events", fn: vEvents, roles: ["editor", "admin"], hide: function () { return !(edit && edit.kind === "events"); } }]);
+  }
+  function vSettingsTabs() {
+    return tabbed("settings", "Website Settings", [{ key: "brand", label: "Logo, footer & menu", fn: vSettings }, { key: "seo", label: "Social links & page titles", fn: vSocialSeo }]);
+  }
+
+  /* ---------- social links and SEO ---------- */
+  function vSocialSeo() {
+    return sb.from("site_settings").select("key,value").in("key", ["social", "seo"]).then(ok).then(function (r) {
+      var st = {}; r.data.forEach(function (x) { st[x.key] = x.value || {}; });
+      var soc = st.social || {}, seo = st.seo || {};
+      var f1 = h("div", {}, h("h2", {}, "Social media links"), h("p", { class: "muted" }, "Shown in the website footer. Each link must start with https://. Leave blank to hide."),
+        field("Facebook", "facebook", soc.facebook), field("Instagram", "instagram", soc.instagram), field("YouTube", "youtube", soc.youtube), field("X", "x", soc.x), field("TikTok", "tiktok", soc.tiktok));
+      var pages = h("div", {}, h("h2", { style: "margin-top:2.5rem" }, "Page titles and descriptions (for Google)"),
+        h("p", { class: "muted" }, "Leave a box empty to keep the built-in wording."));
+      var inputs = {};
+      Object.keys(NAV_PAGES).forEach(function (k) {
+        var cur = seo[k] || {}, t = h("input", { type: "text", value: cur.title || "", placeholder: "Page title", "aria-label": NAV_PAGES[k] + " title" }), d = h("textarea", { rows: 2, placeholder: "Short description (about 150 characters)", "aria-label": NAV_PAGES[k] + " description" });
+        d.value = cur.description || ""; inputs[k] = { t: t, d: d };
+        pages.append(h("div", { class: "panel", style: "margin-bottom:.8rem" }, h("strong", {}, NAV_PAGES[k]), h("div", { style: "margin-top:.5rem" }, t), h("div", { style: "margin-top:.5rem" }, d)));
+      });
+      return h("div", {}, f1, pages, h("button", { class: "btn primary", onclick: function () {
+        var v = vals(f1), bad = Object.keys(v).filter(function (k) { return v[k] && !/^https:\/\//i.test(v[k]); });
+        if (bad.length) return fail(new Error("Social links must start with https:// (check: " + bad.join(", ") + ")."));
+        var out = {}; Object.keys(inputs).forEach(function (k) { var t = inputs[k].t.value.trim(), d = inputs[k].d.value.trim(); if (t || d) out[k] = { title: t, description: d }; });
+        Promise.all([saveContent("site_settings", "social", v), saveContent("site_settings", "seo", out)]).then(function () { toast("Saved. The public site updates right away.", true); }).catch(fail);
+      } }, "Save social links and page titles"));
+    });
+  }
+
+  /* ---------- announcement manager ---------- */
+  var ANN_CATS = ["Community Events", "Fundraisers", "Recruitment", "Public Safety Notices", "Department Announcements", "Special Events"];
+  var ANN_CLS = { "Community Events": "community", "Fundraisers": "fundraiser", "Recruitment": "recruit", "Public Safety Notices": "safety", "Department Announcements": "dept", "Special Events": "special" };
+  var annFilter = "all", URL_OK = /^(https?:\/\/[^\s]+|[a-z0-9_.\/#?=&%-]+)$/i;
+  function annState(a) {
+    var now = Date.now();
+    if (a.status === "archived") return "Archived"; if (a.status === "draft") return "Draft";
+    if (!a.is_active) return "Published, but not chosen as the active announcement";
+    if (a.starts_at && new Date(a.starts_at) > now) return "Active, starts " + fmt(a.starts_at);
+    if (a.ends_at && new Date(a.ends_at) <= now) return "Expired " + fmt(a.ends_at);
+    return "LIVE NOW";
+  }
+  function vAnnouncements() {
+    if (edit && edit.kind === "announcement") return annEditor(edit.rec);
+    return sb.from("announcements").select("*").order("created_at", { ascending: false }).limit(200).then(ok).then(function (r) {
+      var rows = r.data.filter(function (a) { return annFilter === "all" || (annFilter === "live" ? (a.status === "published") : a.status === annFilter); });
+      var t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "Announcement"), h("th", {}, "Category"), h("th", {}, "Status"), h("th", {}, "")));
+      rows.forEach(function (a) { t.append(h("tr", {}, h("td", {}, a.title + (a.importance === "important" ? "  \u2022 Important" : "")), h("td", {}, a.category), h("td", {}, annState(a)),
+        h("td", {}, h("button", { class: "btn ghost small", onclick: function () { edit = { kind: "announcement", rec: a }; shell(); } }, "Open")))); });
+      var bar = h("div", { class: "row", style: "margin:1rem 0" }, [["all", "All"], ["draft", "Drafts"], ["live", "Published"], ["archived", "Archived"]].map(function (x) {
+        return h("button", { class: "btn small " + (annFilter === x[0] ? "primary" : "ghost"), onclick: function () { annFilter = x[0]; shell(); } }, x[1]); }));
+      return h("div", {}, h("h1", {}, "Announcement Manager"),
+        h("p", { class: "muted prose" }, "An announcement appears as a pop-up the first time someone opens the homepage. Only one announcement shows at a time: the one you choose as Active. Visitors who close it will not see it again."),
+        h("button", { class: "btn primary", onclick: function () { edit = { kind: "announcement", rec: { category: "Department Announcements", importance: "informational", status: "draft", is_active: false, revision: 1 } }; shell(); } }, "New announcement"),
+        bar, rows.length ? t : h("p", { class: "muted" }, "No announcements here yet."));
+    });
+  }
+  function annModal(a, imgUrl, onClose) {
+    var wrap = h("div", { class: "ann-overlay" });
+    var dlg = h("div", { class: "ann ann-" + (ANN_CLS[a.category] || "dept") + (a.importance === "important" ? " ann-important" : ""), role: "dialog", "aria-modal": "true", "aria-label": "Announcement preview", tabindex: "-1" },
+      h("button", { type: "button", class: "ann-x", "aria-label": "Close preview", onclick: onClose }, "\u00d7"),
+      imgUrl ? h("img", { class: "ann-img", src: imgUrl, alt: "" }) : null,
+      h("div", { class: "ann-body" }, h("p", { class: "ann-tag" }, h("span", {}, a.category), a.importance === "important" ? h("span", { class: "ann-flag" }, "Important") : null),
+        h("h2", {}, a.title || "(no headline yet)"), (a.body || "").split(/\n\s*\n/).filter(Boolean).map(function (p) { return h("p", {}, p); }),
+        h("div", { class: "ann-actions" }, a.button_label && a.button_url ? h("span", { class: "btn primary" }, a.button_label) : null, h("button", { type: "button", class: "btn ghost", onclick: onClose }, "Close"))));
+    wrap.append(dlg); return wrap;
+  }
+  function annEditor(rec) {
+    var photo = photoPicker(rec.image_path, "Announcement image (optional)");
+    var cat = h("select", { name: "category" }, ANN_CATS.map(function (c) { return h("option", { value: c }, c); })); cat.value = rec.category || ANN_CATS[0];
+    var imp = h("select", { name: "importance" }, [h("option", { value: "informational" }, "Informational"), h("option", { value: "important" }, "Important")]); imp.value = rec.importance || "informational";
+    var isAdmin = me.role === "admin", stOpts = isAdmin ? ["draft", "published", "archived"] : ["draft", "archived"];
+    var st = h("select", { name: "status" }, stOpts.map(function (o) { return h("option", { value: o }, { draft: "Draft (not public)", published: "Published", archived: "Archived" }[o]); })); st.value = stOpts.indexOf(rec.status) > -1 ? rec.status : "draft";
+    var f = h("div", {}, field("Headline", "title", rec.title), h("label", { class: "f" }, h("span", {}, "Category"), cat), h("label", { class: "f" }, h("span", {}, "Type"), imp),
+      field("Description (blank line between paragraphs)", "body", rec.body, "textarea", 5), photo.node,
+      field("Button label (optional, for example: Learn more)", "button_label", rec.button_label),
+      field("Button destination (a page on this site such as join.html, or a link starting with https://)", "button_url", rec.button_url),
+      field("Start showing on (optional)", "starts_local", toLocal(rec.starts_at), "datetime-local"), field("Stop showing on (optional)", "ends_local", toLocal(rec.ends_at), "datetime-local"),
+      h("label", { class: "f" }, h("span", {}, isAdmin ? "Status" : "Status (only an administrator can publish)"), st));
+    function collect() {
+      var v = vals(f);
+      return { title: v.title, body: v.body || null, image_path: photo.get(), button_label: v.button_label || null, button_url: v.button_url || null, category: v.category, importance: v.importance,
+        status: v.status, starts_at: fromLocal(v.starts_local), ends_at: fromLocal(v.ends_local) };
+    }
+    function valid(row) {
+      if (!row.title) return "Please enter a headline."; if (row.title.length > 120) return "The headline must be 120 characters or fewer.";
+      if ((row.button_label && !row.button_url) || (!row.button_label && row.button_url)) return "Please fill in both the button label and the button destination, or leave both empty.";
+      if (row.button_url && !URL_OK.test(row.button_url)) return "The button destination must be a page such as join.html or a link starting with https://";
+      if (row.starts_at && row.ends_at && new Date(row.ends_at) <= new Date(row.starts_at)) return "The end time must be after the start time."; return "";
+    }
+    function reload(id) { return sb.from("announcements").select("*").eq("id", id).single().then(ok).then(function (x) { edit = { kind: "announcement", rec: x.data }; shell(); }); }
+    function save() {
+      var row = collect(), bad = valid(row); if (bad) return fail(new Error(bad));
+      var p = rec.id ? update("announcements", rec.id, row) : sb.from("announcements").insert(row).select().single().then(ok).then(function (x) { return x.data; });
+      return p.then(function (saved) { toast("Saved.", true); return reload(saved.id); }).catch(fail);
+    }
+    var info = h("div", { class: "panel", style: "margin:1rem 0" }, h("strong", {}, "Status: " + (rec.id ? annState(rec) : "Not saved yet")),
+      h("p", { class: "muted", style: "margin:.5rem 0 0" }, "Fixing a typo does not bring the pop-up back for people who already closed it. To show an updated announcement to everyone again, use \"Show again to all visitors\" below."));
+    var row1 = h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () { save(); } }, "Save"),
+      h("button", { class: "btn ghost", onclick: function () {
+        var a = collect(), bad = valid(a); if (bad) return fail(new Error(bad));
+        var ov = annModal(a, a.image_path ? pubUrl(a.image_path) : null, close); function close() { document.removeEventListener("keydown", esc, true); ov.remove(); }
+        function esc(e) { if (e.key === "Escape") { e.preventDefault(); close(); } } document.addEventListener("keydown", esc, true); document.body.append(ov); ov.querySelector(".ann-x").focus();
+      } }, "Preview"),
+      h("button", { class: "btn ghost", onclick: leave }, "Back to list"));
+    var admin = !isAdmin ? h("p", { class: "muted" }, "An administrator will publish this announcement and choose when it goes live.") : h("div", { class: "row", style: "margin-top:1rem" },
+      h("button", { class: "btn primary", onclick: function () {
+        var row = collect(), bad = valid(row); if (bad) return fail(new Error(bad));
+        if (!confirm("Publish this announcement and make it the one visitors see on the homepage?")) return;
+        row.status = "published";
+        var p = rec.id ? update("announcements", rec.id, row) : sb.from("announcements").insert(row).select().single().then(ok).then(function (x) { return x.data; });
+        p.then(function (saved) { return sb.rpc("set_active_announcement", { p_id: saved.id }).then(ok).then(function () { toast("Published and active.", true); return reload(saved.id); }); }).catch(fail);
+      } }, "Save, publish & make active"),
+      rec.id ? h("button", { class: "btn ghost", onclick: function () { sb.rpc("set_active_announcement", { p_id: rec.id }).then(ok).then(function () { toast("This is now the active announcement.", true); return reload(rec.id); }).catch(fail); } }, "Make this the active announcement") : null,
+      rec.id ? h("button", { class: "btn ghost", onclick: function () { update("announcements", rec.id, { status: "draft", is_active: false }).then(function () { toast("Unpublished.", true); return reload(rec.id); }).catch(fail); } }, "Unpublish") : null,
+      rec.id ? h("button", { class: "btn ghost", onclick: function () { update("announcements", rec.id, { status: "archived", is_active: false }).then(function () { toast("Archived.", true); return reload(rec.id); }).catch(fail); } }, "Archive") : null,
+      rec.id ? h("button", { class: "btn ghost", onclick: function () {
+        if (!confirm("Show this announcement again to every visitor, including people who already closed it?")) return;
+        update("announcements", rec.id, { revision: (rec.revision || 1) + 1 }).then(function () { toast("It will show again to all visitors.", true); return reload(rec.id); }).catch(fail); } }, "Show again to all visitors") : null);
+    return h("div", {}, h("h1", {}, rec.id ? "Edit announcement" : "New announcement"), info, f, row1, admin,
+      rec.id ? h("div", { class: "row", style: "margin-top:2rem" }, deleteBtn("announcements", rec, function () { return [rec.image_path]; })) : null);
+  }
+
+  /* ---------- firefighter applications (administrators) ---------- */
+  var APP_STATUS = { "new": "New", reviewing: "Reviewing", interview: "Interview", accepted: "Accepted", declined: "Declined", withdrawn: "Withdrawn", archived: "Archived" };
+  var appQ = "", appStatus = "open";
+  function csvCell(v) { v = v == null ? "" : String(v); if (/^[=+\-@\t\r]/.test(v)) v = "'" + v; return '"' + v.replace(/"/g, '""') + '"'; }
+  function vApplications() {
+    if (edit && edit.kind === "application") return appEditor(edit.rec, edit.people);
+    return Promise.all([sb.from("applications").select("*").order("created_at", { ascending: false }).limit(1000).then(ok), sb.from("profiles").select("id,email").in("role", ["admin", "editor"]).then(ok)]).then(function (x) {
+      var rows = x[0].data, people = x[1].data, who = {}; people.forEach(function (p) { who[p.id] = p.email; });
+      var box = h("div", {}), listBox = h("div", {});
+      var q = h("input", { type: "search", placeholder: "Search name, email, or phone", "aria-label": "Search applications", value: appQ, oninput: function () { appQ = q.value; draw(); } });
+      var sel = h("select", { "aria-label": "Filter by status", onchange: function () { appStatus = sel.value; draw(); } }, [h("option", { value: "open" }, "Open (not archived)"), h("option", { value: "all" }, "Everything")].concat(Object.keys(APP_STATUS).map(function (k) { return h("option", { value: k }, APP_STATUS[k]); })));
+      sel.value = appStatus;
+      function filtered() {
+        var t = appQ.trim().toLowerCase();
+        return rows.filter(function (a) {
+          if (appStatus === "open" ? a.status === "archived" : (appStatus !== "all" && a.status !== appStatus)) return false;
+          return !t || [a.full_name, a.email, a.phone].join(" ").toLowerCase().indexOf(t) > -1;
+        });
+      }
+      function draw() {
+        var list = filtered(), t = h("table", { class: "t" }, h("tr", {}, h("th", {}, "Received"), h("th", {}, "Name"), h("th", {}, "Status"), h("th", {}, "Assigned to"), h("th", {}, "")));
+        list.forEach(function (a) { t.append(h("tr", {}, h("td", {}, fmt(a.created_at)), h("td", {}, a.full_name), h("td", {}, a.status === "new" ? h("strong", {}, "NEW") : APP_STATUS[a.status]),
+          h("td", {}, who[a.assigned_to] || ""), h("td", {}, h("button", { class: "btn ghost small", onclick: function () { edit = { kind: "application", rec: a, people: people }; shell(); } }, "Open")))); });
+        listBox.replaceChildren(h("p", { class: "muted" }, list.length + " shown"), list.length ? t : h("p", { class: "muted" }, "No applications match."));
+      }
+      draw();
+      box.append(h("h1", {}, "Firefighter Applications"),
+        h("p", { class: "muted prose" }, "Applications sent from the Join Us page are stored privately here and can be seen only by administrators. The department is currently accepting firefighter applications only."),
+        h("div", { class: "row", style: "margin:1rem 0" }, h("div", { style: "flex:1;min-width:220px" }, q), h("div", { style: "min-width:200px" }, sel),
+          h("button", { class: "btn ghost", onclick: function () {
+            var list = filtered(); if (!list.length) return fail(new Error("There is nothing to export."));
+            if (!confirm("This file contains applicants' private information. Keep it secure and delete it when you no longer need it. Download " + list.length + " application(s)?")) return;
+            var cols = ["created_at", "full_name", "phone", "email", "age", "address", "experience", "motivation", "availability", "status", "internal_notes"];
+            var csv = [cols.map(csvCell).join(",")].concat(list.map(function (a) { return cols.map(function (c) { return csvCell(a[c]); }).join(","); })).join("\r\n");
+            var url = URL.createObjectURL(new Blob([csv], { type: "text/csv" })), link = h("a", { href: url, download: "applications-" + new Date().toISOString().slice(0, 10) + ".csv" }); document.body.append(link); link.click(); link.remove(); setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+          } }, "Export CSV")), listBox);
+      return box;
+    });
+  }
+  function appEditor(a, people) {
+    function item(l, v) { return h("div", {}, h("span", {}, l), v || "\u2013"); }
+    var details = h("div", { class: "panel" }, h("h2", {}, a.full_name), h("div", { class: "meta-grid" },
+      item("Received", fmt(a.created_at)), item("Phone", a.phone ? h("a", { href: "tel:" + a.phone.replace(/[^\d+]/g, "") }, a.phone) : null), item("Email", a.email ? h("a", { href: "mailto:" + a.email }, a.email) : null),
+      item("Age", a.age), item("Address", a.address), item("Agreed to be contacted", a.agreed_to_contact ? "Yes" : "No")),
+      h("h3", {}, "Experience"), h("p", {}, a.experience || "\u2013"), h("h3", {}, "Why they want to join"), h("p", {}, a.motivation || "\u2013"), h("h3", {}, "Availability"), h("p", {}, a.availability || "\u2013"));
+    var stSel = h("select", { name: "status" }, Object.keys(APP_STATUS).map(function (k) { return h("option", { value: k }, APP_STATUS[k]); })); stSel.value = a.status;
+    var asg = h("select", { name: "assigned_to" }, [h("option", { value: "" }, "Unassigned")].concat((people || []).map(function (p) { return h("option", { value: p.id }, p.email); }))); asg.value = a.assigned_to || "";
+    var notes = h("textarea", { name: "internal_notes", rows: 6 }); notes.value = a.internal_notes || "";
+    var f = h("div", {}, h("h2", { style: "margin-top:2rem" }, "Review"), h("label", { class: "f" }, h("span", {}, "Status"), stSel), h("label", { class: "f" }, h("span", {}, "Follow-up assigned to"), asg),
+      h("label", { class: "f" }, h("span", {}, "Internal notes (never shown publicly)"), notes));
+    return h("div", {}, h("h1", {}, "Application"), details, f, h("div", { class: "row" },
+      h("button", { class: "btn primary", onclick: function () {
+        update("applications", a.id, { status: stSel.value, assigned_to: asg.value || null, internal_notes: notes.value.trim() || null }).then(function () { toast("Saved.", true); leave(); }).catch(fail);
+      } }, "Save"),
+      h("button", { class: "btn ghost", onclick: function () { update("applications", a.id, { status: "archived" }).then(function () { toast("Archived.", true); leave(); }).catch(fail); } }, "Archive"),
+      h("button", { class: "btn ghost", onclick: leave }, "Back to list"),
+      h("button", { class: "btn danger", onclick: function () {
+        if (!confirm("Permanently delete " + a.full_name + "'s application? This cannot be undone. Follow the department's record-retention policy.")) return;
+        sb.from("applications").delete().eq("id", a.id).select().then(function (x) { if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to delete this.")); toast("Deleted.", true); leave(); });
+      } }, "Delete permanently")));
+  }
+
+  /* ---------- version history ---------- */
+  var KEY_NAME = { contact: "Contact details", meetings: "Meeting information", home_hero: "Homepage headline", recruitment: "Join Us text", featured: "Featured announcement card", about: "About page text",
+    donation: "Donation information", navigation: "Main menu", footer: "Footer", branding: "Logo", social: "Social links", seo: "Page titles and descriptions" };
+  function summarize(v) {
+    if (Array.isArray(v)) return v.map(function (x) { return x && x.label ? x.label : JSON.stringify(x); }).join(", ");
+    if (v && typeof v === "object") return Object.keys(v).map(function (k) { var x = v[k]; return k.replace(/_/g, " ") + ": " + (typeof x === "object" ? JSON.stringify(x) : x); });
+    return String(v);
+  }
+  function vHistory() {
+    return sb.from("content_revisions").select("*").order("at", { ascending: false }).limit(150).then(function (r) {
+      if (r.error) throw new Error("Version history is not set up yet. Run the supabase-cms.sql file in Supabase first. (" + r.error.message + ")");
+      var box = h("div", {}, h("h1", {}, "Version History"),
+        h("p", { class: "muted prose" }, "Every time website text is changed, the previous wording is saved here. Restore puts the old wording back (and saves the current wording too, so nothing is lost). This covers text settings such as homepage text, contact details, the menu, and donation info. Articles, events, photos, and announcements are edited on their own pages."));
+      if (!r.data.length) box.append(h("p", { class: "muted" }, "No changes have been recorded yet."));
+      r.data.forEach(function (x) {
+        var lines = summarize(x.value), body = h("div", { hidden: true, class: "muted", style: "margin:.6rem 0" }, Array.isArray(lines) ? lines.map(function (l) { return h("div", {}, l); }) : lines);
+        box.append(h("div", { class: "panel", style: "margin-bottom:.8rem" }, h("strong", {}, KEY_NAME[x.key] || x.key), h("span", { class: "muted" }, "  \u2022 saved " + fmt(x.at) + (x.user_email ? " by " + x.user_email : "") + " (wording before that change)"),
+          h("div", { class: "row", style: "margin-top:.6rem" }, h("button", { class: "btn ghost small", onclick: function () { body.hidden = !body.hidden; } }, "Show / hide wording"),
+            h("button", { class: "btn primary small", onclick: function () {
+              if (!confirm("Restore this earlier version of \"" + (KEY_NAME[x.key] || x.key) + "\"?")) return;
+              saveContent(x.table_name, x.key, x.value).then(function () { toast("Restored. The public site updates right away.", true); shell(); }).catch(fail);
+            } }, "Restore this version")), body));
+      });
       return box;
     });
   }
