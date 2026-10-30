@@ -265,10 +265,11 @@
       var fallback = "Sorry, that did not send. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM.";
       f.addEventListener("submit", function (e) {
         e.preventDefault();
-        if (!C.web3formsKey) { status.textContent = "This form is not connected yet. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM."; return; }
+        var key = f.closest("#message") ? (C.web3formsContactKey || C.web3formsKey) : C.web3formsKey;
+        if (!key) { status.textContent = "This form is not connected yet. Please call 423-538-5221 or come to our Tuesday night meeting at 7 PM."; return; }
         var fd = new FormData(f); if (fd.get("botcheck")) return;
         var data = {}; fd.forEach(function (v, k) { if (k !== "botcheck") data[k] = v; });
-        data.access_key = C.web3formsKey; data.subject = f.getAttribute("data-subject"); data.from_name = "Bluff City VFD website";
+        data.access_key = key; data.subject = f.getAttribute("data-subject"); data.from_name = "Bluff City VFD website";
         btn.disabled = true; status.textContent = "Sending\u2026";
         fetch("https://api.web3forms.com/submit", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify(data) })
           .then(function (r) { return r.json(); })
