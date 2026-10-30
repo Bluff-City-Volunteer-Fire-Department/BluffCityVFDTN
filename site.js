@@ -2,6 +2,19 @@
 // If anything fails, the page keeps its built-in text, so the site never goes blank.
 (function () {
   var C = window.BCVFD; if (!C) return;
+
+  (function logoFallback() {
+    var im = document.querySelector(".brand img"); if (!im) return;
+    var cands = ["logo.png", "logo.jpg", "logo.jpeg", "logo.webp", "logo.svg"], i = 0;
+    function next() {
+      if (im.dataset.fromSettings) return;
+      i++;
+      if (i < cands.length) { im.style.display = ""; im.src = cands[i]; } else { im.removeAttribute("src"); im.style.display = "none"; }
+    }
+    im.addEventListener("error", next);
+    if (im.complete && im.naturalWidth === 0) next();
+  })();
+
   function get(path) {
     return fetch(C.url + "/rest/v1/" + path, { headers: { apikey: C.key } })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
@@ -242,7 +255,7 @@
         return '<li><a href="' + esc(it.href) + '"' + (it.href === here ? ' aria-current="page"' : "") + ">" + esc(it.label) + "</a></li>"; }).join("");
     }
     var logo = s.branding && s.branding.logo_path, im = document.querySelector(".brand img");
-    if (logo && im) { im.src = photoUrl(logo); im.style.display = ""; }
+    if (logo && im) { im.dataset.fromSettings = "1"; im.src = photoUrl(logo); im.style.display = ""; }
     if (s.footer && s.footer.blurb) document.querySelectorAll('[data-footer="blurb"]').forEach(function (el) { el.textContent = s.footer.blurb; });
   }
 
