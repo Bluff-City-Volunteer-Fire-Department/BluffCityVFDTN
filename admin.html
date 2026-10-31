@@ -636,6 +636,39 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
     if (!paths.length) return Promise.resolve({});
     return sb.storage.from("incident-media").createSignedUrls(paths, 3600).then(function (r) { var m = {}; (r.data || []).forEach(function (x) { if (x.signedUrl) m[x.path] = x.signedUrl; }); return m; });
   }
+
+  /* ---------- mutual aid / assisting agencies picker ---------- */
+  function agencyPicker(selectedText, masterList, canEdit) {
+    var master = masterList.slice(), chosen = String(selectedText || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean), manage = false, box = h("div", {});
+    chosen.forEach(function (n) { if (master.indexOf(n) < 0) master.push(n); });     // keep agencies typed on older calls
+    function persist() { return canEdit ? saveContent("site_content", "mutual_aid", { list: master }) : Promise.resolve(); }
+    function draw() {
+      var input = h("input", { type: "text", placeholder: "Agency name (for example: Piney Flats Volunteer Fire Department)", "aria-label": "New agency name", style: "flex:1;min-width:240px" });
+      function add() {
+        var name = input.value.trim().replace(/,/g, " ").replace(/\s+/g, " "); if (!name) return;
+        var hit = master.filter(function (m) { return m.toLowerCase() === name.toLowerCase(); })[0];
+        if (hit) { if (chosen.indexOf(hit) < 0) chosen.push(hit); return draw(); }
+        master.push(name); chosen.push(name); persist().then(draw).catch(function (e) { master.pop(); chosen.pop(); fail(e); draw(); });
+      }
+      box.replaceChildren(
+        master.length ? h("div", { class: "row", style: "gap:.4rem 1.2rem" }, master.map(function (n) {
+          var cb = h("input", { type: "checkbox", checked: chosen.indexOf(n) > -1, onchange: function () { var i = chosen.indexOf(n); if (cb.checked && i < 0) chosen.push(n); if (!cb.checked && i > -1) chosen.splice(i, 1); } });
+          return h("label", {}, cb, " " + n, manage ? h("button", { type: "button", class: "btn danger small", style: "margin-left:.5rem", onclick: function () {
+            if (!confirm("Remove " + n + " from the saved list? Past calls keep their wording.")) return;
+            master.splice(master.indexOf(n), 1); var i = chosen.indexOf(n); if (i > -1) chosen.splice(i, 1); persist().then(draw).catch(fail);
+          } }, "Remove") : null);
+        })) : h("p", { class: "muted" }, "No agencies saved yet."),
+        canEdit ? h("div", { class: "row", style: "margin-top:.7rem" }, input,
+          h("button", { type: "button", class: "btn ghost small", onclick: add }, "Add agency"),
+          h("button", { type: "button", class: "btn ghost small", onclick: function () { manage = !manage; draw(); } }, manage ? "Done managing" : "Manage saved list"))
+          : h("p", { class: "muted" }, "To add a new agency to this list, ask an editor."));
+      input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); add(); } });
+    }
+    draw();
+    return { node: h("div", { class: "f" }, h("span", { class: "muted" }, "Assisting / mutual aid agencies (tick everyone who was there)"), box),
+      get: function () { var out = master.filter(function (n) { return chosen.indexOf(n) > -1; }); return out.length ? out.join(", ") : null; }, persist: persist };
+  }
+
   function vIncidents() {
     if (edit && edit.kind === "incident") return incidentEditor(edit.rec);
     return sb.from("incidents").select("id,incident_date,category,general_location,status,published_at,created_at").order("incident_date", { ascending: false }).limit(300).then(ok).then(function (r) {
@@ -652,7 +685,8 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
     });
   }
   function incidentEditor(rec) {
-    return sb.from("apparatus").select("unit_number").order("sort_order").then(function (ar) {
+    return Promise.all([sb.from("apparatus").select("unit_number").order("sort_order"), getContent(["mutual_aid"])]).then(function (res) {
+      var ar = res[0], agencies = agencyPicker(rec.assisting_agencies, ((res[1].mutual_aid || {}).list || []), me.role !== "contributor");
       var units = (ar.data || []).map(function (x) { return x.unit_number; }), chosen = (rec.responding_apparatus || []).slice();
       var cat = h("select", { name: "category" }, INC_CATS.map(function (c) { return h("option", { value: c }, c); })); cat.value = rec.category || INC_CATS[0];
       var unitBox = h("div", { class: "row" }, units.map(function (u) {
@@ -662,19 +696,19 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
       var f = h("div", {}, field("Incident date", "incident_date", rec.incident_date, "date"), h("label", { class: "f" }, h("span", {}, "Incident type"), cat),
         field("General location (area or road name only, no house numbers)", "general_location", rec.general_location),
         h("div", { class: "f" }, h("span", { class: "muted" }, "Responding apparatus"), unitBox),
-        field("Brief narrative (what the department did; keep it general)", "narrative", rec.narrative, "textarea", 8), field("Assisting agencies (optional)", "assisting_agencies", rec.assisting_agencies),
+        field("Brief narrative (what the department did; keep it general)", "narrative", rec.narrative, "textarea", 8), agencies.node,
         statusField(rec.status, true));
       var photosBox = h("div", {});
       function saveInc() {
-        var v = vals(f); if (!v.incident_date) return fail(new Error("Please choose the incident date."));
+        var v = vals(f); v.assisting_agencies = agencies.get(); if (!v.incident_date) return fail(new Error("Please choose the incident date."));
         var row = { incident_date: v.incident_date, category: v.category, general_location: v.general_location || null, responding_apparatus: chosen, narrative: v.narrative || null,
-          assisting_agencies: v.assisting_agencies || null, status: v.status };
+          assisting_agencies: v.assisting_agencies, status: v.status };
         if (v.status === "published") {
           var warn = privacyCheck([v.general_location, v.narrative, v.assisting_agencies].join("\n"));
           if (warn.length && !confirm("Before publishing, please check this call. It may contain: " + warn.join("; ") + ".\n\nPublish anyway?")) return;
         } else row.published_at = null;
         var p = rec.id ? update("incidents", rec.id, row) : sb.from("incidents").insert(row).select().single().then(ok).then(function (x) { return x.data; });
-        p.then(function (saved) { toast(v.status === "published" ? "Saved and published." : "Saved.", true); edit = { kind: "incident", rec: saved }; shell(); }).catch(fail);
+        p.then(function (saved) { agencies.persist().catch(function () {}); toast(v.status === "published" ? "Saved and published." : "Saved.", true); edit = { kind: "incident", rec: saved }; shell(); }).catch(fail);
       }
       var top = h("div", {}, h("h1", {}, rec.id ? "Review call" : "New call draft"),
         h("p", { class: "muted prose" }, me.role === "admin" ? "As an administrator you can publish. Read the text and photos carefully first." : "Mark the call Ready for review when it is done. An administrator will decide whether it is published."), f,
