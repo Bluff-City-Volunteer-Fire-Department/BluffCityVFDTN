@@ -292,6 +292,46 @@
     }).catch(function () { box.innerHTML = "<p>The gallery could not be loaded right now. Please try again later.</p>"; });
   }
 
+  /* ----- Recent Calls detail page ----- */
+  var AG_ICONS = {
+    fire: '<path d="M12 2c1 3.5-1.5 5-1.5 8a3 3 0 0 0 6 0c0-1.2-.5-2-1-3 2.6 1.6 4.5 4.3 4.5 7.5a8 8 0 1 1-16 0C4 9 8.5 7 12 2z"/>',
+    law: '<path d="M12 2l8 3v6c0 5-3.4 9.2-8 11-4.6-1.8-8-6-8-11V5l8-3zm0 5l1.5 3.2 3.5.4-2.6 2.4.7 3.5L12 14.8 8.9 16.5l.7-3.5L7 10.6l3.5-.4L12 7z"/>',
+    ems: '<path d="M9 2h6v7h7v6h-7v7H9v-7H2V9h7V2z"/>',
+    rescue: '<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12zm0 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" fill-rule="evenodd"/>',
+    other: '<path d="M3 21V9l9-6 9 6v12h-6v-7H9v7H3z"/>'
+  };
+  var CLS_LABEL = { primary: "Primary Responding Agency", automatic_aid: "Automatic Aid", mutual_aid: "Mutual Aid", additional: "Additional Responding Agency" };
+  function timeText(t) { if (!t) return ""; var p = String(t).split(":"), h = parseInt(p[0], 10); if (isNaN(h)) return ""; return (h % 12 || 12) + ":" + p[1] + " " + (h >= 12 ? "PM" : "AM"); }
+  function incidentRender(box, a, photos, ags, isPreview) {
+    var title = a.title || (a.category + (a.general_location ? " \u2014 " + a.general_location : ""));
+    document.title = (a.title || a.category) + " | Bluff City Volunteer Fire Department";
+    var when = fmtDate(a.incident_date + "T12:00:00Z") + (a.incident_time ? " \u00b7 " + timeText(a.incident_time) : ""), apps = (a.responding_apparatus || []).join(", ");
+    function meta(k, v) { return v ? '<div><span class="k">' + k + '</span><span class="v">' + esc(v) + "</span></div>" : ""; }
+    var html = (isPreview ? '<div class="preview-bar">PREVIEW &mdash; this is how the page will look. It is not published.</div>' : "") + '<article class="incident">' +
+      '<header class="inc-head"><div class="eyebrow">' + esc(a.category) + '</div><h2 class="inc-title">' + esc(title) + '</h2><div class="inc-meta">' +
+      meta("Date &amp; time", when).replace(esc(when), esc(when)) + meta("Incident type", a.category) + meta("Location", a.general_location) + meta("Responding apparatus", apps) + "</div></header>" +
+      (a.narrative ? '<div class="inc-narr">' + para(a.narrative) + "</div>" : "");
+    var n = photos.length;
+    function fig(p, k, src, cls, cap) {
+      return '<figure class="' + cls + '"><button type="button" class="g-btn" data-k="' + k + '" aria-label="' + esc(p.caption || ("Enlarge photo " + (k + 1))) + '"><img src="' + esc(src) + '" alt="' + esc(p.caption || ("Incident photo " + (k + 1))) + '"' + (k > 0 ? ' loading="lazy"' : "") + "></button>" +
+        (cap && p.caption ? "<figcaption>" + esc(p.caption) + "</figcaption>" : "") + "</figure>";
+    }
+    if (n === 1) html += '<section class="inc-gallery" aria-label="Incident photographs">' + fig(photos[0], 0, photos[0].url, "g-single", true) + "</section>";
+    else if (n === 2) html += '<section class="inc-gallery" aria-label="Incident photographs"><div class="g-pair">' + fig(photos[0], 0, photos[0].url, "g-cell", false) + fig(photos[1], 1, photos[1].url, "g-cell", false) + "</div></section>";
+    else if (n > 2) {
+      var rest = n - 1, cols = { 2: 2, 3: 3, 4: 2, 5: 3, 6: 3 }[rest] || 4;
+      html += '<section class="inc-gallery" aria-label="Incident photographs">' + fig(photos[0], 0, photos[0].url, "g-feature", true) + '<div class="g-rest" style="grid-template-columns:repeat(' + cols + ',1fr)">' +
+        photos.slice(1).map(function (p, i) { return fig(p, i + 1, cols <= 2 ? p.url : p.thumb, "g-cell", false); }).join("") + "</div></section>";
+    }
+    if (ags.length) html += '<section class="inc-agencies" aria-labelledby="ag-h"><h2 id="ag-h">Responding &amp; Assisting Agencies</h2><div class="agency-grid">' + ags.map(function (g) {
+      var icon = g.logo ? '<img src="' + esc(g.logo) + '" alt="">' : '<svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true">' + (AG_ICONS[g.type] || AG_ICONS.other) + "</svg>";
+      return '<div class="agency"><span class="ic">' + icon + '</span><div><h3>' + esc(g.name) + "</h3>" + (g.classification && CLS_LABEL[g.classification] ? '<span class="cls">' + CLS_LABEL[g.classification] + "</span>" : "") + "</div></div>";
+    }).join("") + "</div></section>";
+    html += '<p class="inc-back"><a class="btn ghost" href="calls.html">&larr; Back to Recent Calls</a></p></article>';
+    box.innerHTML = html;
+    if (n) { var open = lightbox(photos), btns = box.querySelectorAll(".g-btn"); btns.forEach(function (b) { b.addEventListener("click", function () { open(+b.getAttribute("data-k"), b); }); }); }
+  }
+
   function signPaths(paths) {
     if (!paths.length) return Promise.resolve({});
     return fetch(C.url + "/storage/v1/object/sign/incident-media", { method: "POST", headers: { apikey: C.key, "Content-Type": "application/json" }, body: JSON.stringify({ expiresIn: 3600, paths: paths }) })
@@ -300,27 +340,27 @@
   function calls() {
     var box = document.getElementById("calls"); if (!box) return;
     var id = new URLSearchParams(location.search).get("id");
-    if (id) {
+    var preview = new URLSearchParams(location.search).get("preview") === "1";
+    if (id || preview) {
+      if (preview) {
+        var pv = null; try { pv = JSON.parse(localStorage.getItem("bcvfd-preview") || "null"); } catch (e) {}
+        if (!pv || Date.now() - pv.t > 30 * 60 * 1000) { box.innerHTML = "<p>This preview has expired. Go back to the dashboard and click Preview again.</p>"; return; }
+        incidentRender(box, pv.incident, pv.photos || [], pv.agencies || [], true); return;
+      }
       if (!/^[0-9a-f-]{36}$/i.test(id)) { box.innerHTML = "<p>That response could not be found.</p>"; return; }
-      Promise.all([get("incidents?select=*&id=eq." + id), get("incident_photos?select=*&incident_id=eq." + id + "&order=sort_order.asc")]).then(function (r) {
+      Promise.all([get("incidents?select=*&id=eq." + id), get("incident_photos?select=*&incident_id=eq." + id + "&order=sort_order.asc"),
+        get("incident_agencies?select=classification,sort_order,agencies(name,agency_type,logo_path)&incident_id=eq." + id + "&order=sort_order.asc").catch(function () { return []; })]).then(function (r) {
         var a = r[0][0], ph = r[1]; if (!a) { box.innerHTML = "<p>That response could not be found.</p>"; return; }
         var paths = []; ph.forEach(function (p) { paths.push(p.path, thumbOf(p.path)); });
         return signPaths(paths).then(function (m) {
-          document.title = a.category + " | Bluff City Volunteer Fire Department";
-          var apps = (a.responding_apparatus || []).join(", ");
-          box.innerHTML = '<p><a href="calls.html">&larr; All recent calls</a></p><div class="eyebrow">' + esc(fmtDate(a.incident_date + "T12:00:00Z")) + "</div><h2>" + esc(a.category) + (a.general_location ? " &mdash; " + esc(a.general_location) : "") + "</h2>" +
-            '<div class="meta-grid"><div><span>Type</span>' + esc(a.category) + "</div>" + (a.general_location ? "<div><span>General location</span>" + esc(a.general_location) + "</div>" : "") +
-            (apps ? "<div><span>Responding apparatus</span>" + esc(apps) + "</div>" : "") + (a.assisting_agencies ? "<div><span>Assisting agencies</span>" + esc(a.assisting_agencies) + "</div>" : "") + "</div>" +
-            (a.narrative ? '<div class="prose">' + para(a.narrative) + "</div>" : "") +
-            (ph.length ? '<div class="thumbs">' + ph.map(function (p, k) { return '<button type="button" data-k="' + k + '" aria-label="' + esc(p.caption || ("Photo " + (k + 1))) + '"><img src="' + esc(m[thumbOf(p.path)] || "") + '" alt="" loading="lazy"></button>'; }).join("") + "</div>" : "");
-          if (!ph.length) return;
-          var items = ph.map(function (p) { return { url: m[p.path], caption: p.caption }; }), open = lightbox(items);
-          box.querySelectorAll(".thumbs button").forEach(function (b) { b.addEventListener("click", function () { open(+b.getAttribute("data-k"), b); }); });
+          var photos = ph.map(function (p) { return { url: m[p.path], thumb: m[thumbOf(p.path)] || m[p.path], caption: p.caption }; }).filter(function (p) { return p.url; });
+          var ags = (r[2] || []).filter(function (x) { return x.agencies; }).map(function (x) { return { name: x.agencies.name, type: x.agencies.agency_type, logo: x.agencies.logo_path ? photoUrl(x.agencies.logo_path) : "", classification: x.classification }; });
+          incidentRender(box, a, photos, ags, false);
         });
       }).catch(function () { box.innerHTML = "<p>This response could not be loaded right now. Please try again later.</p>"; });
       return;
     }
-    get("incidents?select=id,incident_date,category,general_location,responding_apparatus,narrative&order=incident_date.desc&limit=300").then(function (rows) {
+    get("incidents?select=id,incident_date,category,title,general_location,responding_apparatus,narrative&order=incident_date.desc&limit=300").then(function (rows) {
       if (!rows.length) { box.innerHTML = '<p class="muted">No recent calls have been posted yet. Check back soon.</p>'; return; }
       var cats = [], years = [];
       rows.forEach(function (r) { var y = r.incident_date.slice(0, 4); if (cats.indexOf(r.category) < 0) cats.push(r.category); if (years.indexOf(y) < 0) years.push(y); });
@@ -331,8 +371,8 @@
         var list = rows.filter(function (r) { return (!c || r.category === c) && (!y || r.incident_date.slice(0, 4) === y); });
         document.getElementById("clist").innerHTML = list.length ? list.map(function (r) {
           var n = (r.narrative || ""); if (n.length > 160) n = n.slice(0, 160).replace(/\s+\S*$/, "") + "\u2026";
-          return '<article class="card"><a class="cardlink" href="calls.html?id=' + encodeURIComponent(r.id) + '"><div class="body"><p class="meta up">' + esc(fmtDate(r.incident_date + "T12:00:00Z")) + "</p><h3>" + esc(r.category) + "</h3>" +
-            (r.general_location ? '<p class="type">' + esc(r.general_location) + "</p>" : "") + (r.responding_apparatus && r.responding_apparatus.length ? '<p class="meta">' + esc(r.responding_apparatus.join(", ")) + "</p>" : "") +
+          return '<article class="card"><a class="cardlink" href="calls.html?id=' + encodeURIComponent(r.id) + '"><div class="body"><p class="meta up">' + esc(fmtDate(r.incident_date + "T12:00:00Z")) + "</p><h3>" + esc(r.title || r.category) + "</h3>" +
+            (r.title ? '<p class="meta up">' + esc(r.category) + "</p>" : "") + (r.general_location ? '<p class="type">' + esc(r.general_location) + "</p>" : "") + (r.responding_apparatus && r.responding_apparatus.length ? '<p class="meta">' + esc(r.responding_apparatus.join(", ")) + "</p>" : "") +
             (n ? '<p class="meta">' + esc(n) + "</p>" : "") + "</div></a></article>";
         }).join("") : '<p class="muted">No calls match those filters.</p>';
       }

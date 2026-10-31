@@ -622,6 +622,48 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
   /* ---------- recent calls (incidents) ---------- */
   var INC_CATS = ["Structure Fire", "Vehicle Fire", "Motor Vehicle Accident", "Brush / Wildland Fire", "Fire Alarm", "Hazardous Conditions", "Public Assistance", "Other Emergency Response"];
   var incFilter = "all";
+
+  var AG_TYPES = { fire: "Fire", law: "Law enforcement", ems: "EMS", rescue: "Rescue", other: "Other" };
+  var AG_CLS = { "": "No classification shown", primary: "Primary Responding Agency", automatic_aid: "Automatic Aid", mutual_aid: "Mutual Aid", additional: "Additional Responding Agency" };
+  function vIncidents() {
+    return tabbed("incidents", "Recent Calls", [
+      { key: "calls", label: "Calls", fn: vCallsTab, hide: function () { return !(edit && edit.kind === "incident"); } },
+      { key: "agencies", label: "Agencies", fn: vAgencies, roles: ["editor", "admin"] }]);
+  }
+  function vAgencies() {
+    return sb.from("agencies").select("*").order("name").then(function (r) {
+      if (r.error) throw new Error("The agencies feature is not set up yet. Run supabase-incident-pages.sql in Supabase first. (" + r.error.message + ")");
+      var box = h("div", {}, h("h2", {}, "Agencies"),
+        h("p", { class: "muted prose" }, "Every agency that appears on a call lives here once. Give each one a type (so it shows the right icon) and, if you have permission to use it, a logo. Changes apply to every call that lists the agency."),
+        h("div", { class: "row", style: "margin-bottom:1.5rem" }, h("button", { class: "btn primary", onclick: function () {
+          var n = prompt("Agency name"); if (!n || !n.trim()) return;
+          sb.from("agencies").insert({ name: n.trim().replace(/\s+/g, " ") }).then(function (x) { if (x.error) return fail(x.error.code === "23505" ? new Error("That agency already exists.") : x.error); toast("Added. Now choose its type.", true); shell(); });
+        } }, "Add an agency")));
+      r.data.forEach(function (a) {
+        var thumb = h("div", { class: "thumb", style: "background:#141414" }, a.logo_path ? h("img", { src: pubUrl(a.logo_path), alt: a.name, style: "object-fit:contain" }) : document.createTextNode("No logo (the " + AG_TYPES[a.agency_type] + " icon is used)"));
+        var type = h("select", { name: "agency_type" }, Object.keys(AG_TYPES).map(function (k) { return h("option", { value: k }, AG_TYPES[k]); })); type.value = a.agency_type;
+        var f = h("div", {}, field("Agency name", "name", a.name), h("label", { class: "f" }, h("span", {}, "Type (chooses the icon)"), type));
+        var file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", "aria-label": "Upload logo for " + a.name, onchange: function () {
+          var fl = file.files[0]; if (!fl) return; var ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[fl.type]; if (!ext) return fail(new Error("Please choose a PNG, JPG, or WebP file."));
+          var path = "uploads/agency-" + crypto.randomUUID() + "." + ext; toast("Uploading\u2026", true);    // saved exactly as provided, never altered
+          sb.storage.from("media").upload(path, fl, { contentType: fl.type, cacheControl: "31536000" }).then(function (x) { if (x.error) throw x.error; var old = a.logo_path; return update("agencies", a.id, { logo_path: path }).then(function (row) {
+            a.logo_path = row.logo_path; thumb.replaceChildren(h("img", { src: pubUrl(path), alt: a.name, style: "object-fit:contain" })); toast("Logo saved.", true); if (old) removeFiles([old]); }); }).catch(fail);
+        } });
+        box.append(h("div", { class: "panel app" }, h("div", {}, thumb, h("div", { style: "margin-top:.6rem" }, file),
+          h("button", { class: "btn ghost small", style: "margin-top:.5rem", onclick: function () { if (!a.logo_path) return; update("agencies", a.id, { logo_path: null }).then(function () { removeFiles([a.logo_path]); shell(); }).catch(fail); } }, "Remove logo")),
+          h("div", {}, f, h("div", { class: "row" }, h("button", { class: "btn primary", onclick: function () {
+            var v = vals(f); if (!v.name) return fail(new Error("Please enter a name."));
+            update("agencies", a.id, { name: v.name, agency_type: v.agency_type }).then(function () { toast("Saved.", true); }).catch(function (e) { fail(e.code === "23505" ? new Error("Another agency already has that name.") : e); });
+          } }, "Save"), h("button", { class: "btn danger", onclick: function () {
+            if (!confirm("Delete " + a.name + "? It will also be removed from every call that lists it.")) return;
+            sb.from("agencies").delete().eq("id", a.id).select().then(function (x) { if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to delete this.")); if (a.logo_path) removeFiles([a.logo_path]); toast("Deleted.", true); shell(); });
+          } }, "Delete")))));
+      });
+      if (!r.data.length) box.append(h("p", { class: "muted" }, "No agencies yet. Click Add an agency."));
+      return box;
+    });
+  }
+
   function privacyCheck(t) {
     var w = []; t = String(t || "");
     if (/\b\d{1,5}\s+(?:[A-Z][A-Za-z]*\s+){0,3}(?:St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Hwy|Highway|Blvd|Boulevard|Ct|Court|Cir|Circle|Way|Pike|Trail|Trl)\b/.test(t)) w.push("what looks like a street address");
@@ -637,39 +679,7 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
     return sb.storage.from("incident-media").createSignedUrls(paths, 3600).then(function (r) { var m = {}; (r.data || []).forEach(function (x) { if (x.signedUrl) m[x.path] = x.signedUrl; }); return m; });
   }
 
-  /* ---------- mutual aid / assisting agencies picker ---------- */
-  function agencyPicker(selectedText, masterList, canEdit) {
-    var master = masterList.slice(), chosen = String(selectedText || "").split(",").map(function (x) { return x.trim(); }).filter(Boolean), manage = false, box = h("div", {});
-    chosen.forEach(function (n) { if (master.indexOf(n) < 0) master.push(n); });     // keep agencies typed on older calls
-    function persist() { return canEdit ? saveContent("site_content", "mutual_aid", { list: master }) : Promise.resolve(); }
-    function draw() {
-      var input = h("input", { type: "text", placeholder: "Agency name (for example: Piney Flats Volunteer Fire Department)", "aria-label": "New agency name", style: "flex:1;min-width:240px" });
-      function add() {
-        var name = input.value.trim().replace(/,/g, " ").replace(/\s+/g, " "); if (!name) return;
-        var hit = master.filter(function (m) { return m.toLowerCase() === name.toLowerCase(); })[0];
-        if (hit) { if (chosen.indexOf(hit) < 0) chosen.push(hit); return draw(); }
-        master.push(name); chosen.push(name); persist().then(draw).catch(function (e) { master.pop(); chosen.pop(); fail(e); draw(); });
-      }
-      box.replaceChildren(
-        master.length ? h("div", { class: "row", style: "gap:.4rem 1.2rem" }, master.map(function (n) {
-          var cb = h("input", { type: "checkbox", checked: chosen.indexOf(n) > -1, onchange: function () { var i = chosen.indexOf(n); if (cb.checked && i < 0) chosen.push(n); if (!cb.checked && i > -1) chosen.splice(i, 1); } });
-          return h("label", {}, cb, " " + n, manage ? h("button", { type: "button", class: "btn danger small", style: "margin-left:.5rem", onclick: function () {
-            if (!confirm("Remove " + n + " from the saved list? Past calls keep their wording.")) return;
-            master.splice(master.indexOf(n), 1); var i = chosen.indexOf(n); if (i > -1) chosen.splice(i, 1); persist().then(draw).catch(fail);
-          } }, "Remove") : null);
-        })) : h("p", { class: "muted" }, "No agencies saved yet."),
-        canEdit ? h("div", { class: "row", style: "margin-top:.7rem" }, input,
-          h("button", { type: "button", class: "btn ghost small", onclick: add }, "Add agency"),
-          h("button", { type: "button", class: "btn ghost small", onclick: function () { manage = !manage; draw(); } }, manage ? "Done managing" : "Manage saved list"))
-          : h("p", { class: "muted" }, "To add a new agency to this list, ask an editor."));
-      input.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); add(); } });
-    }
-    draw();
-    return { node: h("div", { class: "f" }, h("span", { class: "muted" }, "Assisting / mutual aid agencies (tick everyone who was there)"), box),
-      get: function () { var out = master.filter(function (n) { return chosen.indexOf(n) > -1; }); return out.length ? out.join(", ") : null; }, persist: persist };
-  }
-
-  function vIncidents() {
+  function vCallsTab() {
     if (edit && edit.kind === "incident") return incidentEditor(edit.rec);
     return sb.from("incidents").select("id,incident_date,category,general_location,status,published_at,created_at").order("incident_date", { ascending: false }).limit(300).then(ok).then(function (r) {
       var rows = r.data.filter(function (x) { return incFilter === "all" || x.status === incFilter; });
@@ -685,34 +695,34 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
     });
   }
   function incidentEditor(rec) {
-    return Promise.all([sb.from("apparatus").select("unit_number").order("sort_order"), getContent(["mutual_aid"])]).then(function (res) {
-      var ar = res[0], agencies = agencyPicker(rec.assisting_agencies, ((res[1].mutual_aid || {}).list || []), me.role !== "contributor");
+    return sb.from("apparatus").select("unit_number").order("sort_order").then(function (ar) {
       var units = (ar.data || []).map(function (x) { return x.unit_number; }), chosen = (rec.responding_apparatus || []).slice();
       var cat = h("select", { name: "category" }, INC_CATS.map(function (c) { return h("option", { value: c }, c); })); cat.value = rec.category || INC_CATS[0];
       var unitBox = h("div", { class: "row" }, units.map(function (u) {
         var cb = h("input", { type: "checkbox", checked: chosen.indexOf(u) > -1, onchange: function () { var i = chosen.indexOf(u); if (cb.checked && i < 0) chosen.push(u); if (!cb.checked && i > -1) chosen.splice(i, 1); } });
         return h("label", {}, cb, " " + u);
       }));
-      var f = h("div", {}, field("Incident date", "incident_date", rec.incident_date, "date"), h("label", { class: "f" }, h("span", {}, "Incident type"), cat),
+      var f = h("div", {}, field("Page title (optional; leave blank to use the type and area)", "title", rec.title), field("Incident date", "incident_date", rec.incident_date, "date"),
+        field("Incident time (optional)", "incident_time", rec.incident_time ? String(rec.incident_time).slice(0, 5) : "", "time"), h("label", { class: "f" }, h("span", {}, "Incident type"), cat),
         field("General location (area or road name only, no house numbers)", "general_location", rec.general_location),
         h("div", { class: "f" }, h("span", { class: "muted" }, "Responding apparatus"), unitBox),
-        field("Brief narrative (what the department did; keep it general)", "narrative", rec.narrative, "textarea", 8), agencies.node,
+        field("Brief narrative (what the department did; keep it general)", "narrative", rec.narrative, "textarea", 8),
         statusField(rec.status, true));
       var photosBox = h("div", {});
       function saveInc() {
-        var v = vals(f); v.assisting_agencies = agencies.get(); if (!v.incident_date) return fail(new Error("Please choose the incident date."));
+        var v = vals(f); if (!v.incident_date) return fail(new Error("Please choose the incident date."));
         var row = { incident_date: v.incident_date, category: v.category, general_location: v.general_location || null, responding_apparatus: chosen, narrative: v.narrative || null,
-          assisting_agencies: v.assisting_agencies, status: v.status };
+          title: v.title || null, incident_time: v.incident_time || null, status: v.status };
         if (v.status === "published") {
-          var warn = privacyCheck([v.general_location, v.narrative, v.assisting_agencies].join("\n"));
+          var warn = privacyCheck([v.title, v.general_location, v.narrative].join("\n"));
           if (warn.length && !confirm("Before publishing, please check this call. It may contain: " + warn.join("; ") + ".\n\nPublish anyway?")) return;
         } else row.published_at = null;
         var p = rec.id ? update("incidents", rec.id, row) : sb.from("incidents").insert(row).select().single().then(ok).then(function (x) { return x.data; });
-        p.then(function (saved) { agencies.persist().catch(function () {}); toast(v.status === "published" ? "Saved and published." : "Saved.", true); edit = { kind: "incident", rec: saved }; shell(); }).catch(fail);
+        p.then(function (saved) { toast(v.status === "published" ? "Saved and published." : "Saved.", true); edit = { kind: "incident", rec: saved }; shell(); }).catch(fail);
       }
       var top = h("div", {}, h("h1", {}, rec.id ? "Review call" : "New call draft"),
         h("p", { class: "muted prose" }, me.role === "admin" ? "As an administrator you can publish. Read the text and photos carefully first." : "Mark the call Ready for review when it is done. An administrator will decide whether it is published."), f,
-        h("div", { class: "row" }, h("button", { class: "btn primary", onclick: saveInc }, rec.id ? "Save" : "Create draft and add photos"), h("button", { class: "btn ghost", onclick: leave }, "Back to list")));
+        h("div", { class: "row" }, h("button", { class: "btn primary", onclick: saveInc }, rec.id ? "Save" : "Create draft, then add photos and agencies"), h("button", { class: "btn ghost", onclick: leave }, "Back to list")));
       if (!rec.id) return top;
       return sb.from("incident_photos").select("*").eq("incident_id", rec.id).order("sort_order", { ascending: true }).then(ok).then(function (r) {
         var photos = r.data;
@@ -721,12 +731,23 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
             photosBox.replaceChildren(h("h2", { style: "margin-top:2.5rem" }, "Photos (" + photos.length + ")"),
               h("p", { class: "muted" }, "Make sure no faces of patients, license plates, house numbers, or medical scenes are visible. Photos stay private until the call is published."),
               h("div", { class: "grid", style: "grid-template-columns:repeat(auto-fill,minmax(240px,1fr))" }, photos.map(function (p, i) {
-                var cap = h("input", { type: "text", value: p.caption || "", placeholder: "Caption (optional)", "aria-label": "Caption", onchange: function () { update("incident_photos", p.id, { caption: cap.value.trim() || null }).then(function () { toast("Caption saved.", true); }).catch(fail); } });
+                var cap = h("input", { type: "text", value: p.caption || "", placeholder: "Caption (optional)", "aria-label": "Caption", onchange: function () { update("incident_photos", p.id, { caption: cap.value.trim() || null }).then(function () { p.caption = cap.value.trim() || null; toast("Caption saved.", true); }).catch(fail); } });
                 function move(d) { var o = photos[i + d]; if (!o) return; Promise.all([update("incident_photos", p.id, { sort_order: o.sort_order }), update("incident_photos", o.id, { sort_order: p.sort_order })])
                   .then(function () { var t = p.sort_order; p.sort_order = o.sort_order; o.sort_order = t; photos.sort(function (a, b) { return a.sort_order - b.sort_order; }); draw(); }).catch(fail); }
-                return h("div", { class: "panel", style: "padding:.8rem" }, h("div", { class: "thumb" }, m[thumbPath(p.path)] ? h("img", { src: m[thumbPath(p.path)], alt: p.caption || "" }) : "Preview unavailable"), cap,
+                return h("div", { class: "panel", style: "padding:.8rem" }, h("div", { class: "thumb" }, m[thumbPath(p.path)] ? h("img", { src: m[thumbPath(p.path)], alt: p.caption || "" }) : "Preview unavailable"), cap, i === 0 ? h("p", { style: "margin:.4rem 0 0;font-weight:600" }, "\u2605 Featured photo (shown largest)") : null,
                   h("div", { class: "row", style: "margin-top:.5rem" }, h("button", { class: "btn ghost small", disabled: i === 0, onclick: function () { move(-1); }, "aria-label": "Move earlier" }, "\u2190"),
                     h("button", { class: "btn ghost small", disabled: i === photos.length - 1, onclick: function () { move(1); }, "aria-label": "Move later" }, "\u2192"),
+                    i > 0 ? h("button", { class: "btn ghost small", onclick: function () {
+                      update("incident_photos", p.id, { sort_order: photos[0].sort_order - 1 }).then(function () { edit = { kind: "incident", rec: rec }; shell(); }).catch(fail);
+                    } }, "Make featured") : null,
+                    h("label", { class: "btn ghost small", style: "cursor:pointer" }, "Replace", h("input", { type: "file", accept: "image/*", style: "display:none", "aria-label": "Replace this photo", onchange: function (ev) {
+                      var fl = ev.target.files[0]; if (!fl) return; toast("Uploading\u2026", true);
+                      var np = rec.id + "/" + crypto.randomUUID() + ".jpg";
+                      compress(fl, 1600, 0.82).then(function (b) { return sb.storage.from("incident-media").upload(np, b, { contentType: "image/jpeg" }).then(function (x) { if (x.error) throw x.error; }); })
+                        .then(function () { return compress(fl, 480, 0.75); }).then(function (b) { return sb.storage.from("incident-media").upload(thumbPath(np), b, { contentType: "image/jpeg" }).then(function (x) { if (x.error) throw x.error; }); })
+                        .then(function () { return update("incident_photos", p.id, { path: np }); })
+                        .then(function () { sb.storage.from("incident-media").remove([p.path, thumbPath(p.path)]); toast("Photo replaced.", true); edit = { kind: "incident", rec: rec }; shell(); }).catch(fail);
+                    } })),
                     h("button", { class: "btn danger small", onclick: function () {
                       if (!confirm("Delete this photo?")) return;
                       sb.from("incident_photos").delete().eq("id", p.id).select().then(function (x) {
@@ -759,7 +780,62 @@ table.t{width:100%;border-collapse:collapse}.t td,.t th{border-bottom:1px solid 
               toast("Deleted.", true); leave();
             });
           } }, "Delete call");
-          return h("div", {}, top, photosBox, h("div", { class: "row", style: "margin-top:2.5rem" }, del));
+          var SEL = "id,classification,sort_order,agency_id,agencies(id,name,agency_type,logo_path)";
+          return Promise.all([sb.from("incident_agencies").select(SEL).eq("incident_id", rec.id).order("sort_order", { ascending: true }), sb.from("agencies").select("*").order("name")]).then(function (ag) {
+            if (ag[0].error || ag[1].error) throw new Error("The agencies feature is not set up yet. Run supabase-incident-pages.sql in Supabase first. (" + (ag[0].error || ag[1].error).message + ")");
+            var links = ag[0].data, all = ag[1].data, agBox = h("div", {});
+            function logo(a) { return a && a.logo_path ? h("img", { src: pubUrl(a.logo_path), alt: "", style: "max-width:100%;max-height:100%;object-fit:contain" }) : document.createTextNode(AG_TYPES[(a && a.agency_type) || "other"]); }
+            function addLink(id) {
+              return sb.from("incident_agencies").insert({ incident_id: rec.id, agency_id: id, sort_order: nextOrder(links) }).select(SEL).single().then(ok).then(function (x) { links.push(x.data); drawAg(); });
+            }
+            function drawAg() {
+              var used = links.map(function (l) { return l.agency_id; }), avail = all.filter(function (a) { return used.indexOf(a.id) < 0; });
+              var sel = h("select", { "aria-label": "Choose an agency to add" }, [h("option", { value: "" }, avail.length ? "Choose a saved agency\u2026" : "All saved agencies are already on this call")].concat(avail.map(function (a) { return h("option", { value: a.id }, a.name); })));
+              var nn = h("input", { type: "text", placeholder: "New agency name", "aria-label": "New agency name", style: "flex:1;min-width:200px" });
+              var nt = h("select", { "aria-label": "New agency type" }, Object.keys(AG_TYPES).map(function (k) { return h("option", { value: k }, AG_TYPES[k]); }));
+              var rows = links.map(function (l, i) {
+                var cls = h("select", { "aria-label": "Classification for " + l.agencies.name, onchange: function () {
+                  update("incident_agencies", l.id, { classification: cls.value || null }).then(function () { l.classification = cls.value || null; toast("Saved.", true); }).catch(fail); } },
+                  Object.keys(AG_CLS).map(function (k) { return h("option", { value: k }, AG_CLS[k]); })); cls.value = l.classification || "";
+                function mv(d) { var o = links[i + d]; if (!o) return; Promise.all([update("incident_agencies", l.id, { sort_order: o.sort_order }), update("incident_agencies", o.id, { sort_order: l.sort_order })])
+                  .then(function () { var t = l.sort_order; l.sort_order = o.sort_order; o.sort_order = t; links.sort(function (a, b) { return a.sort_order - b.sort_order; }); drawAg(); }).catch(fail); }
+                return h("div", { class: "panel", style: "display:flex;gap:.8rem;align-items:center;flex-wrap:wrap;margin-bottom:.6rem;padding:.6rem .9rem" },
+                  h("span", { class: "thumb", style: "width:46px;height:46px;aspect-ratio:auto;font-size:.7rem;text-align:center" }, logo(l.agencies)), h("strong", { style: "flex:1;min-width:170px" }, l.agencies.name),
+                  h("div", { style: "min-width:210px" }, cls),
+                  h("button", { class: "btn ghost small", disabled: i === 0, onclick: function () { mv(-1); }, "aria-label": "Move up" }, "\u2191"),
+                  h("button", { class: "btn ghost small", disabled: i === links.length - 1, onclick: function () { mv(1); }, "aria-label": "Move down" }, "\u2193"),
+                  h("button", { class: "btn danger small", onclick: function () {
+                    sb.from("incident_agencies").delete().eq("id", l.id).select().then(function (x) { if (x.error || !x.data.length) return fail(x.error || new Error("You do not have permission to remove this.")); links.splice(i, 1); drawAg(); });
+                  } }, "Remove"));
+              });
+              agBox.replaceChildren(h("h2", { style: "margin-top:2.5rem" }, "Responding & assisting agencies"),
+                h("p", { class: "muted prose" }, "Choose from your saved agencies, or create a new one once and reuse it on every call. Only set a classification when you have confirmed it; if left as \"No classification shown\", none is displayed."),
+                rows.length ? h("div", {}, rows) : h("p", { class: "muted" }, "No agencies added to this call yet."),
+                h("div", { class: "row", style: "margin-top:1rem" }, h("div", { style: "flex:1;min-width:240px" }, sel), h("button", { class: "btn primary small", onclick: function () { if (sel.value) addLink(sel.value).catch(fail); } }, "Add to this call")),
+                me.role !== "contributor" ? h("div", { class: "row", style: "margin-top:.8rem" }, nn, h("div", { style: "min-width:170px" }, nt), h("button", { class: "btn ghost small", onclick: function () {
+                  var name = nn.value.trim().replace(/\s+/g, " "); if (!name) return;
+                  sb.from("agencies").insert({ name: name, agency_type: nt.value }).select().single().then(function (x) {
+                    if (x.error) return fail(x.error.code === "23505" ? new Error("That agency already exists. Choose it from the list.") : x.error);
+                    all.push(x.data); all.sort(function (a, b) { return a.name.localeCompare(b.name); }); addLink(x.data.id).catch(fail);
+                  });
+                } }, "Create agency & add")) : h("p", { class: "muted" }, "To create a brand-new agency, ask an editor. Logos are added on the Agencies tab."));
+            }
+            drawAg();
+            var previewBtn = h("button", { class: "btn ghost", onclick: function () {
+              var v = vals(f), paths = []; photos.forEach(function (p) { paths.push(p.path, thumbPath(p.path)); });
+              signedMap(paths).then(function (sm) {
+                var payload = { t: Date.now(), incident: { id: rec.id, incident_date: v.incident_date, incident_time: v.incident_time ? v.incident_time + ":00" : null, category: v.category, title: v.title || null, general_location: v.general_location || null,
+                  responding_apparatus: chosen, narrative: v.narrative || null },
+                  photos: photos.map(function (p) { return { url: sm[p.path], thumb: sm[thumbPath(p.path)] || sm[p.path], caption: p.caption }; }).filter(function (p) { return p.url; }),
+                  agencies: links.map(function (l) { return { name: l.agencies.name, type: l.agencies.agency_type, logo: l.agencies.logo_path ? pubUrl(l.agencies.logo_path) : "", classification: l.classification }; }) };
+                try { localStorage.setItem("bcvfd-preview", JSON.stringify(payload)); } catch (e) { return fail(new Error("Your browser blocked the preview.")); }
+                window.open("calls.html?preview=1", "_blank");
+              }).catch(fail);
+            } }, "Preview public page");
+            return h("div", {}, top, photosBox, agBox, h("div", { class: "row", style: "margin-top:2rem" }, previewBtn,
+              h("span", { class: "muted" }, "Opens the page exactly as visitors will see it, using what is on this screen (save text changes first).")),
+              h("div", { class: "row", style: "margin-top:2.5rem" }, del));
+          });
         });
       });
     });
